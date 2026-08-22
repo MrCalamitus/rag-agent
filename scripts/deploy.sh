@@ -8,6 +8,7 @@
 set -euo pipefail
 
 RAIZ="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export RAIZ
 INFRA="$RAIZ/infra"
 ACCION="${1:-apply}"
 
@@ -69,7 +70,38 @@ fi
 
 [[ "$ECR" =~ ^[0-9]+\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/ ]] \
   || fallo "La URL del ECR no tiene forma válida: '${ECR:0:80}'"
-TAG="$(git -C "$RAIZ" rev-parse --short HEAD 2>/dev/null || date +%Y%m%d%H%M%S)"
+# La etiqueta debe describir lo que se construye, no lo que está commiteado.
+# El build usa el árbol de trabajo: con cambios sin commitear, etiquetar por SHA
+# produce imágenes distintas bajo la misma etiqueta, Terraform no ve diferencia
+# en la task definition y ECS se queda corriendo la anterior. El despliegue
+# "funciona" y no despliega nada.
+SHA="$(git -C "$RAIZ" rev-parse --short HEAD 2>/dev/null || echo nogit)"
+if [[ -n "$(git -C "$RAIZ" status --porcelain 2>/dev/null)" ]]; then
+  TAG="$SHA-$(date +%Y%m%d%H%M%S)"
+  echo "▸ Árbol de trabajo con cambios sin commitear: etiqueta $TAG"
+else
+  TAG="$SHA"
+fi
+
+# El acceso a los modelos se verifica aquí, no en readyz: es un hecho de
+# despliegue, no cambia mientras el servicio corre, y desde esta máquina el
+# plano de control de Bedrock sí es alcanzable.
+echo "▸ Verificando acceso a los modelos configurados"
+ALIAS_SIN_ACCESO="$(
+  AWS_REGION="$REGION" "$RAIZ/.venv/bin/python" - <<'PYCHECK' 2>/dev/null || true
+import os, sys
+sys.path.insert(0, os.path.join(os.environ.get("RAIZ", "."), "src"))
+from luis_cv.infrastructure.config import Settings
+from luis_cv.infrastructure.container import build_catalog
+ajustes = Settings(inference_backend="bedrock", aws_profile=os.environ.get("AWS_PROFILE"),
+                   aws_region=os.environ["AWS_REGION"], _env_file=None)
+print(",".join(build_catalog(ajustes).verify_access()))
+PYCHECK
+)"
+if [[ -n "$ALIAS_SIN_ACCESO" ]]; then
+  fallo "Sin acceso concedido a: $ALIAS_SIN_ACCESO. Habilitarlo en la consola de Bedrock antes de desplegar."
+fi
+echo "  todos los alias tienen acceso"
 
 echo "▸ Construyendo la imagen ($TAG)"
 # --platform explícito: Fargate corre x86_64 y una Mac con Apple Silicon

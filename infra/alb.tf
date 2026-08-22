@@ -1,6 +1,9 @@
 resource "aws_security_group" "alb" {
   name_prefix = "${local.name}-alb-"
-  description = "Entrada pública al balanceador"
+  # EC2 rechaza cualquier carácter fuera de ASCII en la descripción de un
+  # security group, a diferencia de CloudWatch o Bedrock. Por eso estas
+  # descripciones van sin acentos y los comentarios sí los llevan.
+  description = "Entrada publica al balanceador"
   vpc_id      = aws_vpc.main.id
 
   lifecycle { create_before_destroy = true }
@@ -11,7 +14,7 @@ resource "aws_vpc_security_group_ingress_rule" "alb_https" {
   for_each = var.certificate_arn != "" ? toset(var.allowed_cidrs) : toset([])
 
   security_group_id = aws_security_group.alb.id
-  description       = "HTTPS público"
+  description       = "HTTPS publico"
   cidr_ipv4         = each.value
   from_port         = 443
   to_port           = 443

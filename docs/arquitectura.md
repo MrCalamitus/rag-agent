@@ -183,11 +183,11 @@ las pruebas de contrato dejarían de decir algo sobre el otro.
 |---|---|
 | E1 — Endpoint local, contrato completo | ✅ casos A1–A10 y B1–B10 en verde |
 | E2 — Preparación del corpus | ✅ 10 documentos normalizados, con metadatos y manifiesto |
-| E3 — Knowledge Base e ingesta | ◐ KB sobre S3 Vectors escrita en Terraform y validada; falta `apply` e ingesta |
+| E3 — Knowledge Base e ingesta | ✅ KB sobre S3 Vectors desplegada; 10/10 documentos indexados |
 | E4 — Prompt, veracidad y redacción | ✅ reglas, enmascarado y casos C contra el modelo real; guardrail administrado pendiente |
-| E5 — Contenedor y despliegue | ◐ Terraform completo y validado (54 recursos, `plan` limpio); falta el primer `apply` |
-| E6 — Observabilidad | ◐ logs JSON, métricas por filtro, panel y dos alarmas en Terraform; falta X-Ray |
-| E7 — Evaluación | ◐ 13 preguntas de oro medidas contra los tres alias; faltan las 20 y repetir con la KB |
+| E5 — Contenedor y despliegue | ✅ desplegado en ECS Fargate tras ALB; smoke y suite desplegada en verde, **B8 pasa** |
+| E6 — Observabilidad | ◐ logs JSON, métricas por filtro, panel y dos alarmas desplegados; falta X-Ray |
+| E7 — Evaluación | ◐ 14 preguntas contra el despliegue con RAG real (Sonnet 14/14); faltan 6 para las 20 del plan |
 
 **Inferencia real conectada.** El servicio ya corre contra Bedrock sin
 infraestructura: `LUISCV_INFERENCE_BACKEND=bedrock` con la recuperación local.

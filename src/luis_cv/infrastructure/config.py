@@ -68,6 +68,9 @@ class Settings(BaseSettings):
     retrieval_top_k: int = 6
     rate_limit_per_minute: int = 20
     request_timeout_s: float = 110.0  # por debajo del idle_timeout del ALB (120 s)
+    # La sonda de readiness debe contestar mucho antes que el health check del
+    # target group (15 s de intervalo, 5 s de timeout).
+    readiness_timeout_s: float = 4.0
 
     @property
     def uses_bedrock_retrieval(self) -> bool:

@@ -229,3 +229,62 @@ async def test_un_fallo_del_proveedor_es_model_error_sin_detalle():
 
     assert exc.value.type is ErrorType.MODEL_ERROR
     assert "arn:aws" not in exc.value.message
+
+
+async def test_readiness_del_catalogo_no_toca_la_red():
+    """El plano de control no es alcanzable dentro de la VPC y no hace falta:
+    readiness solo mira lo que impide servir."""
+    from luis_cv.infrastructure.outbound.model_catalog import BedrockModelCatalog
+
+    import luis_cv.infrastructure.outbound.bedrock.clients as clientes
+
+    def explota(*a, **k):  # pragma: no cover - no debe llamarse
+        raise AssertionError("readiness no puede llamar al plano de control")
+
+    original = clientes.build_client
+    clientes.build_client = explota
+    try:
+        catalogo = BedrockModelCatalog({"agente-rag-sonnet": MODELO}, region="us-east-1")
+        assert await catalogo.is_available() is True
+    finally:
+        clientes.build_client = original
+
+
+def test_verify_access_detecta_un_alias_sin_acceso():
+    """La verificación de acceso corre en el despliegue, desde fuera de la VPC."""
+    from luis_cv.infrastructure.outbound.model_catalog import BedrockModelCatalog
+
+    class ClienteControlPlano:
+        def list_foundation_models(self):
+            return {"modelSummaries": [{"modelId": "anthropic.claude-haiku-4-5-20251001-v1:0"}]}
+
+    import luis_cv.infrastructure.outbound.bedrock.clients as clientes
+
+    original = clientes.build_client
+    clientes.build_client = lambda *a, **k: ClienteControlPlano()
+    try:
+        catalogo = BedrockModelCatalog({"agente-rag-sonnet": MODELO}, region="us-east-1")
+        assert catalogo.verify_access() == ["agente-rag-sonnet"]
+    finally:
+        clientes.build_client = original
+
+
+def test_verify_access_no_denuncia_cuando_el_plano_de_control_no_responde():
+    """No verificable no es lo mismo que sin acceso: no se bloquea el
+    despliegue por no poder comprobarlo."""
+    from botocore.exceptions import EndpointConnectionError
+
+    from luis_cv.infrastructure.outbound.model_catalog import BedrockModelCatalog
+
+    import luis_cv.infrastructure.outbound.bedrock.clients as clientes
+
+    def explota(*a, **k):
+        raise EndpointConnectionError(endpoint_url="https://bedrock.us-east-1.amazonaws.com")
+
+    original = clientes.build_client
+    clientes.build_client = explota
+    try:
+        catalogo = BedrockModelCatalog({"agente-rag-sonnet": MODELO}, region="us-east-1")
+        assert catalogo.verify_access() == []
+    finally:
+        clientes.build_client = original

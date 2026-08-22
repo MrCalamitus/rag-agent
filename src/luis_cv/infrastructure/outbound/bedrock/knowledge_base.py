@@ -77,10 +77,11 @@ class BedrockKnowledgeBase:
     # -- interno --------------------------------------------------------
     def _boto(self) -> Any:
         if self._client is None:
-            import boto3
+            from .clients import RETRIEVAL, build_client
 
-            session = boto3.Session(profile_name=self._profile) if self._profile else boto3.Session()
-            self._client = session.client("bedrock-agent-runtime", region_name=self._region)
+            self._client = build_client(
+                "bedrock-agent-runtime", region=self._region, profile=self._profile, config=RETRIEVAL
+            )
         return self._client
 
     def _retrieve_one(self, query: str, top_k: int) -> list[Chunk]:

@@ -137,9 +137,17 @@ Un alias no reconocido → `invalid_request`, `code: "model_not_found"`,
 `param: "model"`.
 
 Los IDs concretos de Bedrock viven en configuración (variables de entorno o
-Parameter Store), **nunca** en el código. El mapa se resuelve al arranque y se
-valida contra los modelos con acceso concedido; si un alias configurado no
-está disponible, el servicio no pasa `readyz`.
+Parameter Store), **nunca** en el código. El mapa se valida contra los modelos
+con acceso concedido **en el despliegue**: si un alias configurado no está
+disponible, `deploy.sh` aborta antes de publicar la imagen.
+
+La validación no vive en `readyz` a propósito. Que un alias tenga acceso es un
+hecho inmutable mientras el servicio corre, y comprobarlo exige el plano de
+control de Bedrock —un servicio distinto del runtime, con su propio endpoint de
+VPC—. Reverificarlo en cada sonda cuesta latencia y un endpoint adicional para
+no aportar información nueva, y haría que `readyz` reportara `not_ready` un
+servicio que atiende peticiones sin problema. `readyz` comprueba lo que de
+verdad impide servir: recuperación e inferencia.
 
 ---
 

@@ -80,10 +80,11 @@ class BedrockLanguageModel:
     # -- interno --------------------------------------------------------
     def _boto(self) -> Any:
         if self._client is None:
-            import boto3
+            from .clients import INFERENCE, build_client
 
-            session = boto3.Session(profile_name=self._profile) if self._profile else boto3.Session()
-            self._client = session.client("bedrock-runtime", region_name=self._region)
+            self._client = build_client(
+                "bedrock-runtime", region=self._region, profile=self._profile, config=INFERENCE
+            )
         return self._client
 
     def _build_request(self, model, system_prompt, conversation, settings) -> dict[str, Any]:

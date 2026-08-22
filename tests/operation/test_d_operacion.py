@@ -186,3 +186,67 @@ def test_d6_diez_streams_simultaneos_sin_degradar_el_ttft(settings, telemetry, a
     assert all(completado for _, completado in resultados)
     peor = max(ttft for ttft, _ in resultados)
     assert peor < 2.0, f"el peor TTFT con 10 streams simultáneos fue {peor:.3f}s (§8)"
+
+
+async def test_la_sonda_de_readiness_esta_acotada(settings, telemetry):
+    """Una sonda que tarda más que el balanceador no informa: produce un 504.
+
+    El límite vive en el caso de uso, no en cada adaptador: un adaptador nuevo
+    que olvide su timeout no puede dejar la sonda colgada.
+    """
+    import asyncio
+    import time
+
+    from luis_cv.application.check_readiness import CheckReadiness
+
+    class KbQueNuncaResponde:
+        async def retrieve(self, queries, *, top_k=6):  # pragma: no cover
+            raise NotImplementedError
+
+        async def is_available(self) -> bool:
+            await asyncio.sleep(30)
+            return True
+
+    caso = CheckReadiness(
+        catalog=build_container(
+            settings,
+            knowledge_base=StubKnowledgeBase(),
+            language_model=GroundedStubLanguageModel(),
+            clock=FrozenClock(),
+            ids=SequentialIds(),
+            telemetry=telemetry,
+        ).catalog,
+        knowledge_base=KbQueNuncaResponde(),
+        language_model=GroundedStubLanguageModel(),
+        timeout_s=0.2,
+    )
+
+    inicio = time.perf_counter()
+    reporte = await caso()
+    transcurrido = time.perf_counter() - inicio
+
+    assert transcurrido < 1.0, f"la sonda tardó {transcurrido:.1f}s pese al límite"
+    assert reporte.ready is False
+    assert reporte.knowledge_base is False, "la dependencia lenta se marca no disponible"
+    assert reporte.inference is True, "las demás comprobaciones no se contaminan"
+
+
+async def test_una_dependencia_que_revienta_no_propaga_la_excepcion():
+    from luis_cv.application.check_readiness import CheckReadiness
+
+    class KbRota:
+        async def retrieve(self, queries, *, top_k=6):  # pragma: no cover
+            raise NotImplementedError
+
+        async def is_available(self) -> bool:
+            raise RuntimeError("boom")
+
+    caso = CheckReadiness(
+        catalog=StubKnowledgeBase(),  # cualquier objeto con is_available sirve
+        knowledge_base=KbRota(),
+        language_model=GroundedStubLanguageModel(),
+    )
+
+    reporte = await caso()
+
+    assert reporte.knowledge_base is False

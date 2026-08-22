@@ -43,7 +43,7 @@ class Container:
     check_readiness: CheckReadiness
 
 
-def build_catalog(settings: Settings) -> ModelCatalogPort:
+def build_catalog(settings: Settings, telemetry: TelemetryPort | None = None) -> ModelCatalogPort:
     mapping = {
         alias: ModelDescriptor(
             alias=alias,
@@ -54,7 +54,12 @@ def build_catalog(settings: Settings) -> ModelCatalogPort:
         for alias, model_id in settings.model_aliases.items()
     }
     if settings.uses_bedrock_inference:
-        return BedrockModelCatalog(mapping, region=settings.aws_region, profile=settings.aws_profile)
+        return BedrockModelCatalog(
+            mapping,
+            region=settings.aws_region,
+            profile=settings.aws_profile,
+            telemetry=telemetry,
+        )
     return StaticModelCatalog(mapping)
 
 
@@ -100,12 +105,12 @@ def build_container(
     settings = settings or Settings()
     configure_logging(settings.log_level)
 
-    catalog = catalog or build_catalog(settings)
+    telemetry = telemetry or StructuredTelemetry()
+    catalog = catalog or build_catalog(settings, telemetry)
     knowledge_base = knowledge_base or build_knowledge_base(settings)
     language_model = language_model or build_language_model(settings)
     clock = clock or SystemClock()
     ids = ids or UuidGenerator()
-    telemetry = telemetry or StructuredTelemetry()
 
     return Container(
         settings=settings,
@@ -128,5 +133,6 @@ def build_container(
             catalog=catalog,
             knowledge_base=knowledge_base,
             language_model=language_model,
+            timeout_s=settings.readiness_timeout_s,
         ),
     )
