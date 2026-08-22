@@ -49,6 +49,7 @@ def build_catalog(settings: Settings) -> ModelCatalogPort:
             alias=alias,
             provider_model_id=model_id,
             family=settings.model_families.get(alias, "anthropic"),
+            supports_sampling=settings.model_sampling.get(alias, True),
         )
         for alias, model_id in settings.model_aliases.items()
     }

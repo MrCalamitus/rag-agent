@@ -182,12 +182,17 @@ las pruebas de contrato dejarían de decir algo sobre el otro.
 | Etapa (plan) | Estado |
 |---|---|
 | E1 — Endpoint local, contrato completo | ✅ casos A1–A10 y B1–B10 en verde |
-| E2 — Preparación del corpus | ⏳ en curso (documentos fuente) |
-| E3 — Knowledge Base e ingesta | ⏳ adaptador escrito y probado con cliente falso; falta crear la KB |
-| E4 — Prompt, veracidad y redacción | ✅ reglas y enmascarado; guardrail administrado pendiente |
-| E5 — Contenedor y despliegue | ◐ Dockerfile listo; falta Terraform |
-| E6 — Observabilidad | ◐ logs JSON y tramos; falta dashboard y X-Ray |
-| E7 — Evaluación | ◐ runner listo; faltan las 20 preguntas de oro |
+| E2 — Preparación del corpus | ✅ 10 documentos normalizados, con metadatos y manifiesto |
+| E3 — Knowledge Base e ingesta | ◐ KB sobre S3 Vectors escrita en Terraform y validada; falta `apply` e ingesta |
+| E4 — Prompt, veracidad y redacción | ✅ reglas, enmascarado y casos C contra el modelo real; guardrail administrado pendiente |
+| E5 — Contenedor y despliegue | ◐ Terraform completo y validado (54 recursos, `plan` limpio); falta el primer `apply` |
+| E6 — Observabilidad | ◐ logs JSON, métricas por filtro, panel y dos alarmas en Terraform; falta X-Ray |
+| E7 — Evaluación | ◐ 13 preguntas de oro medidas contra los tres alias; faltan las 20 y repetir con la KB |
+
+**Inferencia real conectada.** El servicio ya corre contra Bedrock sin
+infraestructura: `LUISCV_INFERENCE_BACKEND=bedrock` con la recuperación local.
+`make test-real` ejecuta los casos C contra Claude Sonnet 5. Los resultados
+comparativos entre familias están en la bitácora §9.
 
 Mientras la ingesta no exista, el agente **no inventa: se queda sin evidencia y
 declina**. Es una propiedad probada (`test_con_el_corpus_vacio_el_agente_se_queda_sin_evidencia`),

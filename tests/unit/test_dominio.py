@@ -15,13 +15,32 @@ RFC = "GOOL850315AB1"
 CEDULA = "12345678"
 
 
-@pytest.mark.parametrize("identificador", [CURP, RFC, CEDULA])
+TELEFONO = "5512345678"
+
+
+@pytest.mark.parametrize("identificador", [CURP, RFC, CEDULA, TELEFONO])
 def test_los_identificadores_se_enmascaran_dejando_los_ultimos_cuatro(identificador):
     salida = mask_identifiers(f"Su dato es {identificador}.")
 
     assert identificador not in salida
     assert identificador[-4:] in salida
     assert "*" * (len(identificador) - 4) in salida
+
+
+@pytest.mark.parametrize(
+    "texto",
+    [
+        "Teléfono Móvil +52 (55)12345678",
+        "Contacto: 55 1234 5678",
+        "Tel. 5512345678",
+    ],
+)
+def test_el_telefono_personal_se_enmascara_en_cualquier_formato(texto):
+    """Un móvil en el CV no es una credencial que confirmar: se enmascara."""
+    salida = mask_identifiers(texto)
+
+    assert "5678" in salida
+    assert "12345678" not in salida
 
 
 def test_no_se_enmascaran_anios_ni_cifras_ordinarias():
@@ -40,14 +59,17 @@ def test_reveal_devuelve_el_texto_intacto():
 @pytest.mark.parametrize("trozo", [1, 2, 3, 5, 8, 13])
 def test_el_enmascarado_en_streaming_equivale_al_de_una_sola_pieza(trozo):
     """Un CURP partido entre dos deltas debe enmascararse igual que entero."""
-    texto = f"Su CURP es {CURP}, su RFC {RFC} y la cédula {CEDULA}, titulado en 2019."
+    texto = (
+        f"Su CURP es {CURP}, su RFC {RFC}, la cédula {CEDULA}, "
+        f"su teléfono {TELEFONO}, titulado en 2019."
+    )
     redactor = StreamingRedactor()
 
     piezas = [texto[i : i + trozo] for i in range(0, len(texto), trozo)]
     salida = "".join(redactor.feed(p) for p in piezas) + redactor.flush()
 
     assert salida == mask_identifiers(texto)
-    assert CURP not in salida and RFC not in salida
+    assert CURP not in salida and RFC not in salida and TELEFONO not in salida
 
 
 def test_la_huella_no_permite_reconstruir_el_texto():

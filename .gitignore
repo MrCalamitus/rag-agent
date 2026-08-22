@@ -169,7 +169,9 @@ htmlcov/
 *.tfvars
 !*.tfvars.example
 .terraform/
-.terraform.lock.hcl
+# El lock SÍ se versiona: fija los hashes del provider y es lo que hace que el
+# despliegue sea reproducible en otra máquina.
+!.terraform.lock.hcl
 
 # Reportes de evaluación
 reports/

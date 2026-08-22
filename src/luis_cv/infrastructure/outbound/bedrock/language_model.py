@@ -98,7 +98,7 @@ class BedrockLanguageModel:
         config: dict[str, Any] = {}
         if settings.max_output_tokens:
             config["maxTokens"] = settings.max_output_tokens
-        if settings.temperature is not None:
+        if settings.temperature is not None and model.supports_sampling:
             config["temperature"] = settings.temperature
 
         kwargs: dict[str, Any] = {

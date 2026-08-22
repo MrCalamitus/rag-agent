@@ -12,7 +12,7 @@ from collections.abc import AsyncIterator
 
 from ..domain import events as ev
 from ..domain.conversation import ToolChoice
-from ..domain.errors import AgentError, ErrorType, model_error
+from ..domain.errors import AgentError, ErrorType, invalid_request, model_error
 from ..domain.items import (
     AgentResponse,
     ItemStatus,
@@ -63,6 +63,14 @@ class CreateResponse:
         # Resolver el alias antes de emitir nada: un alias inválido debe poder
         # convertirse en un 400 con cabeceras, no en un error a medio stream.
         model = self._catalog.resolve(command.model_alias)
+        if command.settings.temperature is not None and not model.supports_sampling:
+            # Ignorarlo en silencio sería mentir sobre lo que el servidor hizo
+            # con la petición; el contrato prefiere fallar de forma ruidosa.
+            raise invalid_request(
+                f"El modelo '{command.model_alias}' no acepta 'temperature'.",
+                param="temperature",
+                code="temperature_not_supported",
+            )
 
         response_id = self._ids.response_id()
         created_at = self._clock.unix_seconds()
@@ -91,7 +99,10 @@ class CreateResponse:
             yield ev.MessageStarted(item_id=message_id)
 
             system_prompt = build_system_prompt(
-                command.conversation, outcome.chunks, instructions=command.instructions
+                command.conversation,
+                outcome.chunks,
+                instructions=command.instructions,
+                reveal_identifiers=command.settings.reveal_identifiers,
             )
             redactor = StreamingRedactor(reveal=command.settings.reveal_identifiers)
             texto: list[str] = []

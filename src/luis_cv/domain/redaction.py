@@ -20,8 +20,11 @@ from dataclasses import dataclass
 CURP = re.compile(r"\b[A-ZÑ][AEIOUX][A-ZÑ]{2}\d{6}[HM][A-Z]{5}[A-Z0-9]\d\b")
 RFC = re.compile(r"\b[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}\b")
 CEDULA = re.compile(r"(?<![\d\w])\d{7,8}(?![\d\w])")
+# Teléfono: un CV trae el móvil personal. No es una credencial que haya que
+# confirmar, así que se enmascara igual que un identificador.
+TELEFONO = re.compile(r"(?<![\d\w])(?:\+?52[\s.-]*)?\(?\d{2,3}\)?[\s.-]*\d{3,4}[\s.-]*\d{4}(?![\d\w])")
 
-_PATTERNS = (CURP, RFC, CEDULA)
+_PATTERNS = (CURP, RFC, TELEFONO, CEDULA)
 
 # Cola retenida en streaming: el identificador más largo (CURP, 18) con holgura.
 _HOLDBACK = 24

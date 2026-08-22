@@ -105,6 +105,50 @@ async def test_tool_choice_none_omite_la_recuperacion():
     assert not any(isinstance(e, ev.RetrievalStarted) for e in eventos)
 
 
+async def test_temperature_en_un_modelo_que_no_la_acepta_se_rechaza():
+    """Las familias recientes deprecaron el muestreo. Aceptar el parámetro y
+    descartarlo en silencio sería mentir sobre lo que el servidor hizo."""
+    caso = construir(
+        catalog=StaticModelCatalog(
+            {
+                "sin-muestreo": ModelDescriptor(
+                    "sin-muestreo", "us.anthropic.claude-sonnet-5", supports_sampling=False
+                )
+            }
+        )
+    )
+    cmd = CreateResponseCommand(
+        model_alias="sin-muestreo",
+        conversation=Conversation((Turn(Role.USER, "hola"),)),
+        settings=GenerationSettings(temperature=0.2),
+    )
+
+    with pytest.raises(AgentError) as exc:
+        await recolectar(caso, cmd)
+
+    assert exc.value.code == "temperature_not_supported"
+    assert exc.value.param == "temperature"
+
+
+async def test_sin_temperature_el_modelo_sin_muestreo_funciona():
+    caso = construir(
+        catalog=StaticModelCatalog(
+            {
+                "sin-muestreo": ModelDescriptor(
+                    "sin-muestreo", "us.anthropic.claude-sonnet-5", supports_sampling=False
+                )
+            }
+        )
+    )
+    cmd = CreateResponseCommand(
+        model_alias="sin-muestreo", conversation=Conversation((Turn(Role.USER, "hola"),))
+    )
+
+    eventos = await recolectar(caso, cmd)
+
+    assert isinstance(eventos[-1], ev.ResponseCompleted)
+
+
 async def test_un_alias_desconocido_falla_antes_de_emitir_nada():
     caso = construir()
     cmd = CreateResponseCommand(

@@ -1,0 +1,17 @@
+# Copiar a terraform.tfvars y rellenar. terraform.tfvars está en .gitignore:
+# el account ID no se commitea.
+
+aws_account_id = "000000000000"
+aws_profile    = "luis"
+aws_region     = "us-east-1"
+
+# Sin certificado el ALB sirve HTTP en claro: vale para verificar el despliegue,
+# no para entregar. Poner el ARN de ACM antes de exponer el endpoint de verdad.
+# certificate_arn = "arn:aws:acm:us-east-1:000000000000:certificate/..."
+
+# Restringir en cuanto se sepa desde dónde se va a consumir.
+# allowed_cidrs = ["203.0.113.0/24"]
+
+# Vacío mientras E3 esté pendiente: el servicio arranca con recuperación local.
+# knowledge_base_id = "XXXXXXXXXX"
+# guardrail_id      = "yyyyyyyyyy"

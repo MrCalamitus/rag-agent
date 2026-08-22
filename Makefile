@@ -34,18 +34,45 @@ test-contract: .venv ## Solo los casos A y B del contrato
 test-rag: .venv ## Solo los casos C: recuperación y veracidad
 	$(PY) -m pytest -q -m rag
 
+.PHONY: test-real
+test-real: .venv ## Casos C contra el modelo real de Bedrock (usa .env)
+	AWS_PROFILE=$${AWS_PROFILE:-luis} LUISCV_INFERENCE_BACKEND=bedrock $(PY) -m pytest -q tests/rag
+
 .PHONY: test-deployed
 test-deployed: .venv ## La misma suite contra el ALB (exige BASE_URL y API_TOKEN)
 	@test -n "$$BASE_URL" || (echo "Define BASE_URL=https://... y API_TOKEN=..." && exit 1)
 	$(PY) -m pytest -q -m deployed
 
 .PHONY: eval
-eval: .venv ## Preguntas de oro y reporte comparativo entre modelos
-	$(PY) scripts/eval.py --models $${MODELS:-agente-rag-sonnet}
+eval: .venv ## Preguntas de oro y reporte comparativo (GOLDEN=ruta, MODELS=alias)
+	$(PY) scripts/eval.py --models $${MODELS:-agente-rag-sonnet} \
+		$${GOLDEN:+--golden $$GOLDEN}
+
+.PHONY: corpus
+corpus: .venv ## Prepara el corpus (SOURCE=carpeta OUT=destino, fuera del repo)
+	@test -n "$$SOURCE" -a -n "$$OUT" || (echo "Uso: make corpus SOURCE=~/docs OUT=~/docs/corpus" && exit 1)
+	$(PY) scripts/prep_corpus.py --source $$SOURCE --out $$OUT \
+		$${TRANSCRIPCIONES:+--transcripciones $$TRANSCRIPCIONES} $${SKIP:+--skip $$SKIP}
+
+.PHONY: sync-kb
+sync-kb: ## Sube el corpus a S3 y lanza la ingesta (CORPUS=ruta)
+	./scripts/sync-kb.sh $${CORPUS:-$$LUISCV_CORPUS_DIR}
 
 .PHONY: smoke
 smoke: ## Verificación rápida contra el desplegado
 	./scripts/smoke.sh
+
+.PHONY: plan
+plan: ## terraform plan (no aplica nada; verifica la guarda de cuenta)
+	./scripts/deploy.sh plan
+
+.PHONY: deploy
+deploy: ## Guarda de cuenta + build + push + apply
+	./scripts/deploy.sh
+
+.PHONY: destroy
+destroy: ## Destruye la infraestructura (pide confirmación)
+	terraform -chdir=infra destroy
 
 .PHONY: docker-build
 docker-build: ## Construye la imagen del servicio

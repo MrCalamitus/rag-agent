@@ -32,9 +32,17 @@ _ORACION = re.compile(r"[^\n.;]+[.;]?")
 _DISTINTIVO = 4
 
 
+_PALABRA = re.compile(r"[\w]+", re.UNICODE)
+
+
 def _fold(text: str) -> str:
     d = unicodedata.normalize("NFKD", text.lower())
     return "".join(c for c in d if not unicodedata.combining(c))
+
+
+def _tokens(text: str) -> set[str]:
+    """Palabras sin puntuación: 'profesional:' y 'profesional' son la misma."""
+    return set(_PALABRA.findall(_fold(text)))
 
 
 class GroundedStubLanguageModel:
@@ -79,7 +87,7 @@ def _compose(pregunta: str, fragmentos: list[tuple[str, str]]) -> str:
     if not fragmentos:
         return DECLINE_PHRASE
 
-    consulta = set(_fold(condense(pregunta)).split())
+    consulta = _tokens(condense(pregunta))
     cuerpo = _fold(" ".join(texto for _, texto in fragmentos))
     faltantes = {t for t in consulta if len(t) >= _DISTINTIVO and t not in cuerpo}
     if faltantes:
@@ -101,7 +109,7 @@ def _mejor_oracion(consulta: set[str], texto: str) -> str:
     if not oraciones:
         return ""
     def puntaje(oracion: str) -> int:
-        return len(consulta & set(_fold(oracion).split()))
+        return len(consulta & _tokens(oracion))
     mejor = max(oraciones, key=puntaje)
     return mejor if puntaje(mejor) else oraciones[0]
 

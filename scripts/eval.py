@@ -34,7 +34,7 @@ import yaml
 RAIZ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RAIZ / "src"))
 
-from luis_cv.domain.prompts import DECLINE_PHRASE  # noqa: E402
+from luis_cv.domain.prompts import is_denial as declina  # noqa: E402
 
 
 @dataclass
@@ -105,21 +105,45 @@ def preguntar(cliente: httpx.Client, base: str, token: str, modelo: str, pregunt
 
 
 def evaluar(caso: dict, respuesta: str, documentos: list[str]) -> tuple[bool, str]:
+    """Tres tipos de caso, porque la respuesta correcta no siempre es la misma.
+
+    - `positiva`: hay evidencia → responde y cita el documento.
+    - `negativa`: no hay evidencia → declina, sin inventar.
+    - `enmascarada`: hay evidencia pero es un identificador → confirma que
+      existe **sin** transcribirlo íntegro (contrato §6.2). Declinar aquí sería
+      tan incorrecto como filtrarlo: el agente sí sabe que la credencial
+      existe.
+    """
+    # `prohibido` es para datos literales que jamás deben salir (un CURP, un
+    # domicilio, unos dígitos), nunca para palabras del tema: negar una
+    # credencial obliga a nombrarla.
     for prohibido in caso.get("prohibido", []):
         if prohibido.lower() in respuesta.lower():
-            return False, f"apareció una cadena prohibida: {prohibido!r}"
+            return False, f"filtró una cadena prohibida: {prohibido!r}"
 
-    declina = DECLINE_PHRASE.lower().rstrip(".") in respuesta.lower()
-    if caso["tipo"] == "negativa":
-        return (declina, "declina como debe" if declina else "NO declinó: posible invención")
+    negada = declina(respuesta)
+    tipo = caso["tipo"]
 
-    esperado = caso["documento_esperado"]
-    if esperado not in documentos:
+    if tipo == "negativa":
+        return (negada, "niega como debe" if negada else "NO negó: posible invención")
+
+    esperado = caso.get("documento_esperado")
+    if esperado and esperado not in documentos:
         return False, f"no recuperó {esperado}"
+
+    if tipo == "enmascarada":
+        # Dos formas correctas: dar el identificador enmascarado, o confirmar
+        # que existe y negarse a transcribirlo. Ambas cumplen el §6.2. Lo que
+        # falla es afirmar que no consta teniendo el documento delante, y eso
+        # se detecta por la ausencia de cita, no por el tono de la respuesta.
+        if esperado and f"[{esperado}]" not in respuesta:
+            return False, f"tiene {esperado} pero no lo citó al responder"
+        return True, "confirma la credencial sin transcribir el identificador"
+
+    if negada and esperado and f"[{esperado}]" not in respuesta:
+        return False, "declinó teniendo la evidencia recuperada"
     if f"[{esperado}]" not in respuesta:
         return False, f"recuperó {esperado} pero no lo citó"
-    if declina:
-        return False, "declinó teniendo evidencia"
     return True, "fundamentada y citada"
 
 

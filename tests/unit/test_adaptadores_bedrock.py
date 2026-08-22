@@ -162,6 +162,42 @@ async def test_la_peticion_lleva_el_historial_el_sistema_y_los_ajustes():
     assert "guardrailConfig" not in enviado
 
 
+async def test_no_se_envia_temperature_a_un_modelo_que_la_deprecó():
+    """Bedrock responde ValidationException, no una advertencia: el parámetro
+    simplemente no puede viajar."""
+    cliente = ClienteModeloFalso([_delta("ok")])
+    modelo = BedrockLanguageModel(region="us-east-1", client=cliente)
+    sin_muestreo = ModelDescriptor("agente-rag-sonnet", "us.anthropic.claude-sonnet-5", supports_sampling=False)
+
+    async for _ in modelo.stream(
+        model=sin_muestreo,
+        system_prompt="reglas",
+        conversation=CONVERSACION,
+        settings=GenerationSettings(max_output_tokens=256, temperature=0.2),
+    ):
+        pass
+
+    config = cliente.llamadas[0]["inferenceConfig"]
+    assert config == {"maxTokens": 256}, "temperature no puede llegar al proveedor"
+
+
+async def test_los_deltas_de_razonamiento_no_llegan_al_cliente():
+    """Las familias con pensamiento adaptativo emiten bloques de razonamiento en
+    el mismo stream. El contrato §0 los deja fuera: no se expone traza interna.
+    """
+    cliente = ClienteModeloFalso(
+        [
+            {"contentBlockDelta": {"delta": {"reasoningContent": {"text": "deliberando..."}}}},
+            _delta("Respuesta."),
+        ]
+    )
+    modelo = BedrockLanguageModel(region="us-east-1", client=cliente)
+
+    trozos = await _consumir(modelo)
+
+    assert [c for c in trozos if isinstance(c, TextChunk)] == [TextChunk("Respuesta.")]
+
+
 async def test_el_guardrail_se_aplica_cuando_esta_configurado():
     cliente = ClienteModeloFalso([_delta("ok")])
     modelo = BedrockLanguageModel(region="us-east-1", client=cliente, guardrail_id="gr-1")

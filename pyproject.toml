@@ -30,6 +30,7 @@ markers = [
     "rag: casos C — recuperación y veracidad",
     "operation: casos D — operación",
     "requires_bedrock: exige un modelo real; se salta con adaptadores locales",
+    "requires_kb: exige recuperación semántica (Bedrock KB); el matcher local es léxico",
     "slow: tarda más de un segundo (concurrencia, streaming real)",
     "deployed: corre contra el despliegue; exige BASE_URL",
 ]

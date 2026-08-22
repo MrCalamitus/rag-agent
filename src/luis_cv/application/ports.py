@@ -17,11 +17,18 @@ from ..domain.retrieval import RetrievalOutcome
 
 @dataclass(frozen=True)
 class ModelDescriptor:
-    """Alias público resuelto a un modelo concreto del proveedor."""
+    """Alias público resuelto a un modelo concreto del proveedor.
+
+    `supports_sampling` no es un detalle cosmético: las familias más recientes
+    dejaron de aceptar `temperature` y responden con un error de validación si
+    se envía. Es una capacidad del modelo, así que viaja con el modelo y no
+    dispersa condicionales por el adaptador.
+    """
 
     alias: str
     provider_model_id: str
     family: str = "anthropic"
+    supports_sampling: bool = True
 
 
 @runtime_checkable
