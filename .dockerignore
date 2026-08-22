@@ -1,0 +1,14 @@
+.git
+.github
+.history
+.venv
+corpus
+docs
+infra
+reports
+tests
+**/__pycache__
+*.egg-info
+.pytest_cache
+.env
+*.tfstate*

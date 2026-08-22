@@ -94,9 +94,15 @@ SSE llega de golpe al final y el streaming deja de existir en la práctica.
   "temperature": 0.2,                  // opcional
   "tool_choice": "auto",               // opcional — auto | none | required
   "truncation": "disabled",            // opcional — auto | disabled
-  "metadata": { "caso": "demo-01" }    // opcional — se propaga a los logs
+  "metadata": { "caso": "demo-01" },   // opcional — se propaga a los logs
+  "reveal_identifiers": false          // opcional — extensión, ver §6.2
 }
 ```
+
+`reveal_identifiers` es la "petición explícita y autenticada" del §6.2: con
+`true`, y solo sobre una petición ya autenticada, los identificadores viajan
+íntegros. El default es `false` y el enmascarado se aplica también sobre el
+stream, sin partir un identificador entre dos deltas.
 
 **Reglas de validación**
 
@@ -215,6 +221,7 @@ operador.
 | `type` | HTTP | Cuándo |
 |---|---|---|
 | `invalid_request` | 400 | Esquema inválido, alias desconocido, `store: true` |
+| `authentication_error` | 401 | Falta `Authorization`, esquema distinto de Bearer o token inválido |
 | `not_found` | 404 | Ruta o recurso inexistente |
 | `too_many_requests` | 429 | Límite de tasa excedido |
 | `server_error` | 500 | Fallo interno no atribuible al cliente |

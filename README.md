@@ -100,6 +100,11 @@ descartó un router de modelos externo.
 
 `Python` · `FastAPI` · `boto3` · `Docker` · `Terraform`
 
+El código sigue **arquitectura hexagonal**: el núcleo —reglas de veracidad,
+enmascarado de identificadores, traducción a eventos— no importa `fastapi` ni
+`boto3`; la recuperación y la inferencia entran por puertos. Detalle en
+`docs/arquitectura.md`.
+
 Sin LangChain ni LlamaIndex: menos dependencias, menos superficie de ataque,
 código auditable y control directo del prompt y del formato de eventos.
 
@@ -295,12 +300,38 @@ que permite aislar el costo del proyecto en Cost Explorer con un filtro.
 
 ---
 
+## Estado
+
+| Pieza | Estado |
+|---|---|
+| Contrato Open Responses (casos A y B) | ✅ verificado en local |
+| Recuperación, veracidad y operación (casos C y D) | ✅ verificados con corpus de prueba |
+| Adaptadores de Bedrock (`Retrieve`, `ConverseStream`) | ✅ escritos y probados con clientes falsos |
+| **Ingesta del corpus a la Knowledge Base** | ⏳ **pendiente** |
+| Infraestructura (Terraform) y despliegue | ⏳ pendiente |
+
+Mientras la ingesta no exista, el servicio corre con recuperación sobre
+`corpus/` y un modelo local determinista. La propiedad que lo hace seguro está
+probada: **sin evidencia, el agente declina; nunca inventa**. Activar Bedrock es
+cambiar dos variables de entorno (`LUISCV_RETRIEVAL_BACKEND=bedrock`,
+`LUISCV_INFERENCE_BACKEND=bedrock`), no tocar código.
+
+```bash
+make install        # entorno de desarrollo
+make run            # API en http://localhost:8080, sin AWS
+```
+
+---
+
 ## Pruebas
 
 ```bash
-make test           # contrato + RAG, en local
-make test-deployed  # la misma suite contra el ALB
+make test           # suite completa en local: contrato + RAG + operación
+make test-contract  # solo los casos A y B
+make test-rag       # solo los casos C
+make test-deployed  # la misma aceptación contra el ALB (BASE_URL, API_TOKEN)
 make eval           # preguntas de oro, reporte comparativo entre modelos
+make smoke          # verificación rápida contra el desplegado
 ```
 
 La suite verifica el contrato (esquema, errores, orden y numeración de

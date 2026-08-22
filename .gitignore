@@ -145,3 +145,31 @@ vite.config.ts.timestamp-*
 
 .DS_Store
 .history
+
+# ---- luis-cv (Python / AWS) ----
+# Documentos de identidad: fuera de git, no negociable.
+corpus/*
+!corpus/.gitkeep
+
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+build/
+htmlcov/
+.coverage
+
+# Terraform
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+.terraform/
+.terraform.lock.hcl
+
+# Reportes de evaluación
+reports/
