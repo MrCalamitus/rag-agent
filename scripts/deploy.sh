@@ -116,6 +116,17 @@ docker push "$ECR:bootstrap"
 echo "▸ Aplicando la infraestructura"
 terraform -chdir="$INFRA" apply -input=false -auto-approve -var "container_image=$ECR:$TAG"
 
+# Terraform termina cuando la API de ECS acepta la nueva task definition, no
+# cuando la tarea nueva está sirviendo. Sin esta espera, el script declara
+# éxito mientras el contenedor viejo sigue atendiendo, y una verificación
+# posterior mide el código anterior creyendo que mide el nuevo.
+echo "▸ Esperando a que el servicio se estabilice"
+aws ecs wait services-stable \
+  --cluster "$(tf_output cluster_name)" \
+  --services "$(tf_output service_name)" \
+  --region "$REGION"
+echo "  rollout completo"
+
 BASE="$(tf_output base_url)"
 SECRETO="$(tf_output api_token_secret_arn)"
 echo

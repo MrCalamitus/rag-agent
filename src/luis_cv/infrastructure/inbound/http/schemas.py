@@ -25,12 +25,29 @@ class ContentPart(BaseModel):
     text: str | None = None
 
 
-class InputMessage(BaseModel):
+class InputItem(BaseModel):
+    """Un ítem de la transcripción reenviada por el cliente.
+
+    El servidor es sin estado, así que en cada turno el cliente reproduce todo
+    lo anterior — **incluidos los ítems que este servidor emitió**, como
+    `agente:knowledge_search`. El spec lo exige: un ítem de herramienta
+    hospedada debe permitir «lossless rehydration on followup request».
+
+    Por eso `type` es libre y `content` opcional: solo los `message` se
+    convierten en turnos; el resto se ignora al reconstruir la conversación,
+    porque la recuperación se vuelve a ejecutar con la pregunta nueva. Rechazar
+    esos ítems rompía el segundo turno de cualquier cliente conforme.
+    """
+
     model_config = ConfigDict(extra="ignore")
 
-    type: Literal["message"] = "message"
-    role: str = "user"
-    content: str | list[ContentPart]
+    type: str = "message"
+    role: str | None = None
+    content: str | list[ContentPart] | None = None
+
+    @property
+    def es_mensaje(self) -> bool:
+        return self.type == "message" and self.content is not None
 
 
 class CreateResponseRequest(BaseModel):
@@ -39,7 +56,9 @@ class CreateResponseRequest(BaseModel):
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
     model: str
-    input: str | list[InputMessage]
+    # Cadena, un ítem suelto o una lista. Los clientes reales mandan las tres
+    # formas; aceptarlas no relaja ninguna regla y evita un 400 inútil.
+    input: str | InputItem | list[InputItem]
     instructions: str | None = None
     stream: bool = False
     store: bool = False
@@ -70,6 +89,8 @@ class CreateResponseRequest(BaseModel):
         )
 
     def _conversation(self) -> Conversation:
+        if isinstance(self.input, InputItem):
+            return self._from_items([self.input])
         if isinstance(self.input, str):
             texto = self.input.strip()
             if not texto:
@@ -78,10 +99,16 @@ class CreateResponseRequest(BaseModel):
 
         if not self.input:
             raise invalid_request("El campo 'input' no puede estar vacío.", param="input")
+        return self._from_items(list(self.input))
 
+    def _from_items(self, items: list[InputItem]) -> Conversation:
         turnos: list[Turn] = []
-        for indice, mensaje in enumerate(self.input):
-            turnos.append(Turn(role=_role(mensaje.role, indice), text=_text(mensaje, indice)))
+        for indice, item in enumerate(items):
+            if not item.es_mensaje:
+                # Ítem rehidratado (recuperación previa, razonamiento, etc.):
+                # forma parte de la transcripción, no del diálogo.
+                continue
+            turnos.append(Turn(role=_role(item.role or "user", indice), text=_text(item, indice)))
         if not any(t.role in (Role.USER, Role.ASSISTANT) for t in turnos):
             raise invalid_request(
                 "'input' debe incluir al menos un turno de usuario.", param="input"
@@ -100,9 +127,11 @@ def _role(valor: str, indice: int) -> Role:
         ) from None
 
 
-def _text(mensaje: InputMessage, indice: int) -> str:
+def _text(mensaje: InputItem, indice: int) -> str:
     if isinstance(mensaje.content, str):
         return mensaje.content
+    if mensaje.content is None:  # pragma: no cover - filtrado por `es_mensaje`
+        return ""
     piezas: list[str] = []
     for j, parte in enumerate(mensaje.content):
         if parte.type not in _TEXT_PARTS:
@@ -122,15 +151,34 @@ def unknown_fields(raw: dict[str, Any]) -> list[str]:
     return sorted(k for k in raw if k not in conocidos)
 
 
+# Ramas de la unión de `input`. Pydantic reporta un fallo por rama, y quedarse
+# con el primero produce mensajes inútiles del tipo "input.str: debe ser una
+# cadena" cuando el cliente mandó una lista bien intencionada pero mal formada.
+_RAMAS_DE_UNION = ("str", "list[InputItem]", "InputItem", "function-after")
+
+
 def param_from_validation_error(error: Any) -> tuple[str | None, str]:
-    """Extrae `param` y un mensaje legible del primer fallo de Pydantic."""
+    """Extrae `param` y un mensaje accionable del fallo de Pydantic.
+
+    Ante una unión se descarta el ruido de las ramas que ni siquiera coincidían
+    en tipo y se prefiere el error más profundo: es el que apunta al campo que
+    de verdad está mal.
+    """
     detalles = error.errors()
     if not detalles:
         return None, "La petición no cumple el esquema."
-    primero = detalles[0]
-    loc = ".".join(str(p) for p in primero.get("loc", ()))
-    mensaje = primero.get("msg", "valor inválido")
-    return (loc or None), f"Campo '{loc}': {mensaje}." if loc else f"{mensaje}."
+
+    utiles = [d for d in detalles if not _es_ruido_de_union(d)] or detalles
+    elegido = max(utiles, key=lambda d: len(d.get("loc", ())))
+    loc = ".".join(str(p) for p in elegido.get("loc", ()) if str(p) not in _RAMAS_DE_UNION)
+    mensaje = elegido.get("msg", "valor inválido")
+    return (loc or None), (f"Campo '{loc}': {mensaje}." if loc else f"{mensaje}.")
+
+
+def _es_ruido_de_union(detalle: dict) -> bool:
+    """Un fallo de tipo en la raíz de una rama de unión no dice nada del error real."""
+    loc = detalle.get("loc", ())
+    return len(loc) == 2 and str(loc[1]) in _RAMAS_DE_UNION and detalle.get("type", "").endswith("_type")
 
 
 def as_agent_error(error: Any) -> AgentError:
