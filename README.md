@@ -257,22 +257,37 @@ curl "$BASE_URL/readyz"    # verifica Bedrock y KB alcanzables
 # 1. Verificar identidad y cuenta destino
 aws sts get-caller-identity --profile luis
 
-# 2. Configurar
+# 2. Configurar (terraform.tfvars está en .gitignore)
 cp infra/terraform.tfvars.example infra/terraform.tfvars
-# editar: aws_account_id, aws_region, domain_name
+# editar: aws_account_id · opcional: certificate_arn para HTTPS
 
-# 3. Infraestructura
-cd infra && terraform init && terraform apply
-
-# 4. Corpus e ingesta
-./scripts/sync-kb.sh
-
-# 5. Construir y desplegar la aplicación
+# 3. Infraestructura y aplicación, en un solo paso
 ./scripts/deploy.sh
-
-# 6. Verificar
-./scripts/smoke.sh
 ```
+
+`deploy.sh` hace el recorrido completo en orden: guarda de cuenta, verificación
+de acceso a los modelos, creación del repositorio de imágenes, construcción
+`linux/amd64`, publicación, `terraform apply` y **espera a que el rollout de ECS
+termine** antes de declarar éxito. Ese último paso importa: Terraform acaba
+cuando ECS *acepta* la nueva definición, no cuando la tarea nueva *sirve*.
+
+```bash
+# 4. Preparar el corpus (fuera del repositorio) e ingestarlo
+python scripts/prep_corpus.py --source ~/documentos --out ~/corpus-preparado
+./scripts/sync-kb.sh ~/corpus-preparado
+
+# 5. Verificar contra el despliegue
+export BASE_URL=$(terraform -chdir=infra output -raw base_url)
+export API_TOKEN=$(aws secretsmanager get-secret-value \
+  --secret-id "$(terraform -chdir=infra output -raw api_token_secret_arn)" \
+  --query SecretString --output text)
+
+make smoke && make test-deployed
+```
+
+`sync-kb.sh` falla si la ingesta indexa cero documentos. Es el modo de falla
+silencioso de una base de conocimiento: ingiere nada, el agente responde «no
+consta» a todo y parece prudente cuando en realidad está ciego.
 
 `deploy.sh` compara el account ID real contra el configurado y **aborta si no
 coinciden**. El provider de Terraform aplica la misma guarda vía
@@ -302,23 +317,37 @@ que permite aislar el costo del proyecto en Cost Explorer con un filtro.
 
 ## Estado
 
+**Desplegado y funcionando en AWS.**
+
 | Pieza | Estado |
 |---|---|
-| Contrato Open Responses (casos A y B) | ✅ verificado en local |
-| Recuperación, veracidad y operación (casos C y D) | ✅ verificados con corpus de prueba |
-| Adaptadores de Bedrock (`Retrieve`, `ConverseStream`) | ✅ escritos y probados con clientes falsos |
-| **Ingesta del corpus a la Knowledge Base** | ⏳ **pendiente** |
-| Infraestructura (Terraform) y despliegue | ⏳ pendiente |
+| Contrato Open Responses (casos A y B) | ✅ 32 casos, verificados en local y contra el ALB |
+| Recuperación, veracidad y operación (casos C y D) | ✅ 38 casos, incluidos 25 contra el modelo real |
+| Knowledge Base sobre S3 Vectors | ✅ desplegada, 10 de 10 documentos indexados |
+| Infraestructura (Terraform) y despliegue | ✅ 72 recursos, ECS Fargate tras ALB |
+| Observabilidad | ◐ logs, métricas, panel y alarmas; falta X-Ray y notificación de alarmas |
+| Evaluación con preguntas de oro | ◐ 14 preguntas medidas; el plan contempla 20 |
+| **HTTPS en el balanceador** | ⏳ **pendiente** — hoy sirve en claro, el token viaja legible |
+| Guardrail administrado de Bedrock | ⏳ pendiente |
 
-Mientras la ingesta no exista, el servicio corre con recuperación sobre
-`corpus/` y un modelo local determinista. La propiedad que lo hace seguro está
-probada: **sin evidencia, el agente declina; nunca inventa**. Activar Bedrock es
-cambiar dos variables de entorno (`LUISCV_RETRIEVAL_BACKEND=bedrock`,
-`LUISCV_INFERENCE_BACKEND=bedrock`), no tocar código.
+**Resultados contra el despliegue**, con recuperación real desde la KB:
+
+| Alias | Modelo | Aciertos | Negativas | TTFT p50 |
+|---|---|---|---|---|
+| `agente-rag-sonnet` | Claude Sonnet 5 | **14/14** | 5/5 | 2.77 s |
+| `agente-rag-haiku` | Claude Haiku 4.5 | 13/14 | 5/5 | **1.61 s** |
+| `agente-rag-gpt` | GPT-OSS 120B | 8/14 | 5/5 | 2.15 s |
+
+Cero credenciales inventadas y cero identificadores filtrados en los 42 casos.
+Los fallos de GPT son todos de citación: recupera y responde bien, pero no cita
+el documento — y aquí la cita no es formato, es el mecanismo de no-repudio.
+
+El servicio también corre **sin AWS**, con recuperación sobre `corpus/` y un
+modelo local determinista, que es como corre la suite completa en dos segundos:
 
 ```bash
 make install        # entorno de desarrollo
-make run            # API en http://localhost:8080, sin AWS
+make run            # API en http://localhost:8080, sin AWS ni credenciales
 ```
 
 ---
@@ -357,14 +386,22 @@ diseño lo trata en consecuencia:
 - **Logs sin PII.** Solo identificadores, contadores y latencias. Nunca el
   texto del turno.
 - **Enmascarado en la salida.** El agente confirma la existencia y vigencia de
-  una credencial; los identificadores completos (cédula, CURP, RFC) van
-  enmascarados salvo petición explícita y autenticada.
+  una credencial; los identificadores completos (cédula, CURP, RFC, teléfono)
+  van enmascarados salvo petición explícita y autenticada. El enmascarado
+  también se aplica sobre el stream, sin partir un identificador entre dos
+  fragmentos de texto.
 - **Sin salida a internet.** PrivateLink para todo servicio de AWS consumido.
 - **Permisos mínimos.** El rol de tarea concede solo `InvokeModelWithResponseStream`,
   `Retrieve` sobre el ARN específico de la KB y `ApplyGuardrail`. Sin comodines.
 - **Errores opacos.** Ningún ARN, ID de cuenta ni traza de excepción llega al
   cliente; se devuelve un `request_id` para correlación.
 - El directorio `corpus/` está excluido de control de versiones.
+
+> **Pendiente, y es la brecha abierta más relevante:** sin `certificate_arn`
+> configurado el balanceador escucha en HTTP y el token *Bearer* viaja en
+> claro. Sirve para verificar el despliegue; **no para exponer el endpoint**.
+> El listener HTTPS está escrito y se activa poniendo el ARN de un certificado
+> de ACM en `terraform.tfvars`.
 
 ---
 
@@ -387,25 +424,39 @@ superficie honesta y documentada.
 
 ## Costos
 
-El componente dominante no es la inferencia, sino el **vector store de la
-Knowledge Base**, que puede facturar de forma continua exista o no tráfico.
-Revisar `docs/arquitectura.md` para la comparación de alternativas.
+El componente dominante **no es la inferencia ni el vector store**: son los
+**VPC endpoints**, unos 105 USD al mes. Con el ALB y una tarea de Fargate, el
+costo fijo ronda los 130 USD mensuales.
+
+Que el almacén vectorial no aparezca en esa lista es el resultado de la
+decisión más rentable del proyecto: OpenSearch Serverless factura unidades de
+cómputo de forma continua —del orden de 350 USD al mes de piso— mientras que
+S3 Vectors cobra por almacenamiento y consulta, y con diez documentos eso son
+céntimos. La comparación con números está en la bitácora §12.
+
+Los endpoints son caros a propósito: sin ellos el tráfico a Bedrock saldría por
+internet y el argumento de soberanía del dato se caería solo. Si el presupuesto
+apretara, la palanca correcta es desplegarlos en una sola zona de
+disponibilidad —la mitad del gasto— no volver a un NAT Gateway.
 
 Para desmontar todo:
 
 ```bash
-cd infra && terraform destroy
+make destroy
 ```
 
 ---
 
 ## Documentación
 
-| Documento | Contenido |
+Cada documento responde una pregunta distinta:
+
+| Documento | Responde |
 |---|---|
-| `docs/contrato-open-responses.md` | Contrato normativo del endpoint y suite de aceptación |
-| `docs/arquitectura.md` | Diagrama detallado y justificación de cada componente |
-| `BITACORA.md` | Proceso de decisión: hipótesis evaluadas y rutas descartadas |
+| `docs/contrato-open-responses.md` | **Qué es correcto** — contrato normativo y suite de aceptación |
+| `docs/PLAN.md` | **Cómo se construyó** — etapas, criterios de salida y decisiones abiertas |
+| `docs/Bitacora.MD` | **Por qué se decidió así** — hipótesis evaluadas y rutas descartadas |
+| `docs/arquitectura.md` | **Cómo está hecho** — capas, puertos y adaptadores |
 
 La bitácora documenta también lo que **no** se eligió y por qué: OpenRouter
 frente a Bedrock, Lambda y API Gateway frente a Fargate, y frameworks de

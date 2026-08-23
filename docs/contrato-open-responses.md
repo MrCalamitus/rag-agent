@@ -189,6 +189,16 @@ El orden `output_item.added` → `content_part.added` → deltas →
 `<content>.done` → `content_part.done` → `output_item.done` es **normativo**.
 Un cliente conforme reconstruye la respuesta completa solo con los eventos.
 
+**Nota de conformidad sobre `response.created`.** El spec enumera como eventos
+de estado `response.in_progress`, `response.completed`, `response.failed` e
+`response.incomplete`; `response.created` no aparece en esa lista. Se emite de
+todas formas porque los clientes reales lo esperan —el SDK con el que se
+verificó la interoperabilidad lo consume sin problema— y porque el propio spec
+obliga a los clientes a ignorar los eventos desconocidos sin perder la
+capacidad de reconstruir la respuesta. Se documenta aquí en lugar de
+presentarlo como canónico: quitarlo perjudicaría la interoperabilidad más de lo
+que ganaría en pureza, pero la desviación es real y conviene declararla.
+
 ### El ítem de recuperación (extensión propia)
 
 Aquí está el núcleo del argumento de auditabilidad. En vez de que el RAG sea

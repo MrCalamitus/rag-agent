@@ -192,7 +192,7 @@ las pruebas de contrato dejarían de decir algo sobre el otro.
 **Inferencia real conectada.** El servicio ya corre contra Bedrock sin
 infraestructura: `LUISCV_INFERENCE_BACKEND=bedrock` con la recuperación local.
 `make test-real` ejecuta los casos C contra Claude Sonnet 5. Los resultados
-comparativos entre familias están en la bitácora §9.
+comparativos entre familias están en la bitácora §10.
 
 Mientras la ingesta no exista, el agente **no inventa: se queda sin evidencia y
 declina**. Es una propiedad probada (`test_con_el_corpus_vacio_el_agente_se_queda_sin_evidencia`),
