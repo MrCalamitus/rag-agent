@@ -288,3 +288,44 @@ def test_verify_access_no_denuncia_cuando_el_plano_de_control_no_responde():
         assert catalogo.verify_access() == []
     finally:
         clientes.build_client = original
+
+
+async def test_el_piso_de_relevancia_descarta_los_fragmentos_de_ruido():
+    """`retrieve` siempre devuelve `numberOfResults` fragmentos, ordenados pero
+    sin filtrar: un saludo recupera tantos documentos como una pregunta real.
+    Sin piso, cada turno paga el prompt completo y el modelo recibe evidencia
+    que no viene al caso."""
+    cliente = ClienteKbFalso(
+        {
+            "hola": [
+                _resultado("s3://c/cv.pdf", "texto", 0.566),
+                _resultado("s3://c/titulo.pdf", "texto", 0.554),
+            ]
+        }
+    )
+    kb = BedrockKnowledgeBase(
+        knowledge_base_id="kb-1", region="us-east-1", min_score=0.58, client=cliente
+    )
+
+    outcome = await kb.retrieve(["hola"])
+
+    assert outcome.is_empty, "un saludo no debe arrastrar evidencia irrelevante"
+
+
+async def test_el_piso_conserva_los_fragmentos_relevantes():
+    cliente = ClienteKbFalso(
+        {
+            "titulo": [
+                _resultado("s3://c/titulo.pdf", "texto", 0.629),
+                _resultado("s3://c/cedula.pdf", "texto", 0.582),
+                _resultado("s3://c/github.pdf", "ruido", 0.521),
+            ]
+        }
+    )
+    kb = BedrockKnowledgeBase(
+        knowledge_base_id="kb-1", region="us-east-1", min_score=0.58, client=cliente
+    )
+
+    outcome = await kb.retrieve(["titulo"])
+
+    assert [c.document_id for c in outcome.chunks] == ["titulo.pdf", "cedula.pdf"]

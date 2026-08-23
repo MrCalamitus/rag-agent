@@ -66,6 +66,19 @@ class Settings(BaseSettings):
     model_sampling: dict[str, bool] = Field(default_factory=lambda: dict(DEFAULT_MODEL_SAMPLING))
 
     retrieval_top_k: int = 6
+    # Piso de relevancia. **Desactivado a propósito (0.0).**
+    #
+    # La idea era ahorrar tokens descartando los fragmentos que la KB devuelve
+    # ante un saludo. Medido sobre este corpus con Titan v2, las bandas se
+    # solapan: "Gracias" puntúa 0.586 y "¿Cuál es su número de teléfono?" 0.564.
+    # Cualquier piso que filtre el ruido tumba también preguntas legítimas, y un
+    # falso negativo —declinar teniendo la evidencia delante— es mucho peor que
+    # pagar unos tokens de más en un saludo.
+    #
+    # El filtrado de lo irrelevante lo hace el prompt, que ya declina
+    # correctamente aunque reciba fragmentos que no vienen al caso. Se conserva
+    # el parámetro para corpus mayores, donde los scores sí se separan.
+    retrieval_min_score: float = 0.0
     rate_limit_per_minute: int = 20
     request_timeout_s: float = 110.0  # por debajo del idle_timeout del ALB (120 s)
     # La sonda de readiness debe contestar mucho antes que el health check del

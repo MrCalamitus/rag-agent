@@ -28,11 +28,13 @@ class BedrockKnowledgeBase:
         knowledge_base_id: str,
         region: str,
         profile: str | None = None,
+        min_score: float = 0.0,
         client: Any | None = None,
     ) -> None:
         self._kb_id = knowledge_base_id
         self._region = region
         self._profile = profile
+        self._min_score = min_score
         self._client = client
 
     async def retrieve(self, queries: Sequence[str], *, top_k: int = 6) -> RetrievalOutcome:
@@ -52,9 +54,15 @@ class BedrockKnowledgeBase:
                 code="retrieval_failure",
             ) from exc
 
+        # `retrieve` siempre devuelve `numberOfResults` fragmentos, ordenados
+        # por score pero sin filtrar: un saludo recupera seis documentos igual
+        # que una pregunta legítima. Sin piso de relevancia, cada turno paga el
+        # prompt completo y el modelo recibe evidencia que no viene al caso.
         mejores: dict[str, Chunk] = {}
         for resultados in respuestas:
             for chunk in resultados:
+                if chunk.score < self._min_score:
+                    continue
                 previo = mejores.get(chunk.document_id)
                 if previo is None or chunk.score > previo.score:
                     mejores[chunk.document_id] = chunk

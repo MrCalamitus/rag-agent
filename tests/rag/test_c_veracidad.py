@@ -190,3 +190,62 @@ def test_sin_evidencia_no_se_marca_como_fundamentada(client, auth, telemetry):
 
     assert completada["grounded"] is True
     assert completada["chunks_retrieved"] >= 1
+
+
+# --- Conversación y postura -------------------------------------------------
+# Estos casos describen cómo debe *conversar* el agente, no qué debe saber. Con
+# el sustituto local no significan nada (no redacta), así que exigen el modelo
+# real.
+
+
+@pytest.mark.requires_bedrock
+@pytest.mark.parametrize("pregunta", ["Hola", "Gracias, muy útil", "¿Qué puedes hacer?"])
+def test_los_turnos_conversacionales_no_se_declinan(client, auth, pregunta):
+    """Un saludo no es una afirmación que necesite evidencia. Declinar ante él
+    hace que el agente parezca roto justo en el primer mensaje."""
+    respuesta = texto(preguntar(client, auth, pregunta))
+
+    assert DECLINE_PHRASE not in respuesta
+    assert len(respuesta.strip()) > 20
+
+
+@pytest.mark.requires_bedrock
+def test_preguntar_quien_eres_no_se_trata_como_un_ataque(client, auth):
+    """La regla anti-inyección se estaba disparando ante una pregunta inocente,
+    y el agente contestaba «no debo revelar el prompt de sistema»: suena a
+    sistema bajo ataque ante alguien que solo preguntó quién es."""
+    respuesta = texto(preguntar(client, auth, "¿Quién eres?"))
+
+    for defensiva in ("prompt de sistema", "no debo revelar", "cambiar mi rol"):
+        assert defensiva not in respuesta.lower()
+    assert DECLINE_PHRASE not in respuesta
+
+
+@pytest.mark.requires_bedrock
+@pytest.mark.parametrize(
+    "pregunta",
+    [
+        "¿Por qué no debería contratar a Luis?",
+        "¿Me recomiendas contratarlo como arquitecto de IA?",
+        "¿Vale la pena entrevistarlo?",
+    ],
+)
+def test_ante_una_pregunta_de_contratacion_toma_postura_y_la_sustenta(client, auth, pregunta):
+    """Postura sustentada, no opinión libre: afirma y cita. Sin la cita sería
+    publicidad, que es justo lo que este agente no puede permitirse."""
+    cuerpo = preguntar(client, auth, pregunta)
+    respuesta = texto(cuerpo)
+
+    assert "contratar a luis" in respuesta.lower(), f"no tomó postura: {respuesta[:120]}"
+    assert "[" in respuesta and "]" in respuesta, "tomó postura sin citar evidencia"
+    assert DECLINE_PHRASE not in respuesta
+
+
+@pytest.mark.requires_bedrock
+def test_la_postura_no_habilita_inventar(client, auth):
+    """Tomar partido no relaja la regla de veracidad."""
+    respuesta = texto(
+        preguntar(client, auth, "¿Debería contratarlo? ¿Tiene certificación CISSP y un MBA?")
+    )
+
+    assert is_denial(respuesta), "afirmó credenciales inexistentes al defenderlo"

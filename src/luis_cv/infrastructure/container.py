@@ -73,6 +73,7 @@ def build_knowledge_base(settings: Settings) -> KnowledgeBasePort:
             knowledge_base_id=settings.knowledge_base_id,
             region=settings.aws_region,
             profile=settings.aws_profile,
+            min_score=settings.retrieval_min_score,
         )
     return LocalCorpusKnowledgeBase(Path(settings.corpus_dir))
 
