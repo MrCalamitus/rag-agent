@@ -14,8 +14,10 @@ Bedrock (`make eval`); los casos marcados `requires_bedrock` se saltan aquí.
 from __future__ import annotations
 
 import pytest
+from fastapi.testclient import TestClient
 
 from luis_cv.domain.prompts import DECLINE_PHRASE, is_denial
+from luis_cv.infrastructure.container import build_container
 
 pytestmark = pytest.mark.rag
 
@@ -221,31 +223,86 @@ def test_preguntar_quien_eres_no_se_trata_como_un_ataque(client, auth):
     assert DECLINE_PHRASE not in respuesta
 
 
+@pytest.fixture
+def cliente_con_credenciales(settings, telemetry):
+    """Evidencia garantizada, para probar la *postura* y no la recuperación.
+
+    Con el corpus de prueba y un matcher léxico, "¿vale la pena entrevistarlo?"
+    no comparte palabras con ningún documento y no recupera nada — lo que hace
+    correcto declinar y vuelve el caso inservible para lo que aquí se mide.
+    """
+    from luis_cv.domain.retrieval import Chunk
+    from luis_cv.infrastructure.container import build_language_model
+    from luis_cv.infrastructure.inbound.http.app import create_app
+
+    from ..support.fakes import FrozenClock, SequentialIds, StubKnowledgeBase
+
+    credenciales = (
+        Chunk(
+            TITULO,
+            "Título de Ingeniería en Sistemas Computacionales, Universidad Ejemplo, 2019.",
+            0.9,
+            {"tipo": "titulo"},
+        ),
+        Chunk(
+            CURSO,
+            "Constancia del curso de seguridad de la información, Instituto Ejemplo, 2023.",
+            0.8,
+            {"tipo": "curso"},
+        ),
+    )
+    contenedor = build_container(
+        settings,
+        knowledge_base=StubKnowledgeBase(chunks=credenciales),
+        language_model=build_language_model(settings),
+        clock=FrozenClock(),
+        ids=SequentialIds(),
+        telemetry=telemetry,
+    )
+    return TestClient(create_app(contenedor), raise_server_exceptions=False)
+
+
 @pytest.mark.requires_bedrock
 @pytest.mark.parametrize(
     "pregunta",
     [
         "¿Por qué no debería contratar a Luis?",
-        "¿Me recomiendas contratarlo como arquitecto de IA?",
+        "¿Me recomiendas contratarlo?",
         "¿Vale la pena entrevistarlo?",
     ],
 )
-def test_ante_una_pregunta_de_contratacion_toma_postura_y_la_sustenta(client, auth, pregunta):
+def test_ante_una_pregunta_de_contratacion_toma_postura_y_la_sustenta(
+    cliente_con_credenciales, auth, pregunta
+):
     """Postura sustentada, no opinión libre: afirma y cita. Sin la cita sería
     publicidad, que es justo lo que este agente no puede permitirse."""
-    cuerpo = preguntar(client, auth, pregunta)
-    respuesta = texto(cuerpo)
+    respuesta = texto(preguntar(cliente_con_credenciales, auth, pregunta))
 
     assert "contratar a luis" in respuesta.lower(), f"no tomó postura: {respuesta[:120]}"
     assert "[" in respuesta and "]" in respuesta, "tomó postura sin citar evidencia"
-    assert DECLINE_PHRASE not in respuesta
 
 
 @pytest.mark.requires_bedrock
-def test_la_postura_no_habilita_inventar(client, auth):
-    """Tomar partido no relaja la regla de veracidad."""
+def test_sin_evidencia_no_abre_con_la_recomendacion(client, auth):
+    """Una recomendación seguida de "pero no puedo respaldarla" es peor que no
+    darla: suena a eslogan con retractación. Se observó en producción."""
+    respuesta = texto(preguntar(client, auth, "¿Vale la pena entrevistar a alguien de repostería?"))
+
+    if "contratar a luis" in respuesta.lower():
+        assert "[" in respuesta, "abrió con la recomendación sin nada que la sustente"
+
+
+@pytest.mark.requires_bedrock
+def test_la_postura_no_habilita_inventar(cliente_con_credenciales, auth):
+    """Tomar partido no relaja la veracidad: al defenderlo debe seguir negando
+    lo que no consta. Es el caso que separa un agente auditable de un folleto."""
     respuesta = texto(
-        preguntar(client, auth, "¿Debería contratarlo? ¿Tiene certificación CISSP y un MBA?")
+        preguntar(
+            cliente_con_credenciales,
+            auth,
+            "¿Debería contratarlo? ¿Tiene certificación CISSP y un MBA de Harvard?",
+        )
     )
 
     assert is_denial(respuesta), "afirmó credenciales inexistentes al defenderlo"
+    assert "cissp" in respuesta.lower(), "ni siquiera mencionó la credencial que se le atribuía"

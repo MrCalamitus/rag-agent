@@ -139,3 +139,38 @@ def test_el_resultado_de_recuperacion_deduplica_documentos():
 
     assert outcome.documents() == ("a.md", "b.md")
     assert not outcome.is_empty
+
+
+@pytest.mark.parametrize(
+    "respuesta",
+    [
+        "Eso no consta en los documentos disponibles.",
+        "No, esa certificación no aparece en la documentación.",
+        "No dispongo de información sobre sus preferencias personales.",
+        "No hay ningún registro de una certificación CISSP.",
+        "No puedo confirmar ese dato con los documentos disponibles.",
+        "No figura en el corpus.",
+    ],
+)
+def test_se_reconocen_las_formas_de_negacion_de_un_modelo_real(respuesta):
+    """Un modelo real casi nunca usa la frase canónica literal, y sus
+    negaciones suelen ser mejores: nombran qué falta y ofrecen continuar."""
+    from luis_cv.domain.prompts import is_denial
+
+    assert is_denial(respuesta)
+
+
+@pytest.mark.parametrize(
+    "respuesta",
+    [
+        "Sí, cuenta con certificación CISSP vigente [doc.md].",
+        "Está titulado como Ingeniero en Computación [titulo.md].",
+        "Debes contratar a Luis. Su maestría lo respalda [cedula.md].",
+    ],
+)
+def test_una_afirmacion_no_se_confunde_con_una_negacion(respuesta):
+    """La heurística no puede dar por negada una respuesta que afirma: sería
+    dar por bueno justo el fallo que la evaluación busca."""
+    from luis_cv.domain.prompts import is_denial
+
+    assert not is_denial(respuesta)

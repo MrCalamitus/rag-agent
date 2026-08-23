@@ -31,6 +31,14 @@ DENIAL_MARKERS = (
     "no puedo",
     "no cuenta con",
     "no tiene",
+    # Un modelo real dice "no dispongo de información sobre sus preferencias"
+    # antes que la frase canónica, y es una negación mejor: nombra qué falta y
+    # ofrece continuar. La heurística tenía que aprenderlo.
+    "no dispongo",
+    "no dispone",
+    "no tengo información",
+    "no cuento con",
+    "no obra",
 )
 
 
