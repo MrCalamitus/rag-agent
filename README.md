@@ -34,7 +34,7 @@ Cambiar de dominio no es tocar Python.
 | Tema | Corpus | Particularidad |
 |---|---|---|
 | `luis-cv` | Títulos, cédulas y constancias | Enmascara CURP, RFC y teléfonos; postura sustentada ante preguntas de contratación |
-| `coches` | 101 fichas técnicas y folletos de 14 marcas | Trocea documentos largos; deduce `marca` de la carpeta; sin enmascarado |
+| `coches` | 123 fichas técnicas y folletos de 14 marcas | Trocea documentos largos; deduce `marca` de la carpeta; transcribe los PDF de imagen conservando la tabla |
 
 El despliegue sirve **todos los temas a la vez**: se comparte el plano de cómputo
 —VPC, ALB, ECS, endpoints— y se duplica solo la Knowledge Base, que sobre S3
@@ -158,6 +158,39 @@ enmascarado de identificadores, traducción a eventos— no importa `fastapi` ni
 
 Sin LangChain ni LlamaIndex: menos dependencias, menos superficie de ataque,
 código auditable y control directo del prompt y del formato de eventos.
+
+---
+
+### PDFs que no se dejan leer
+
+Un corpus real trae documentos ilegibles. La ingesta intenta tres cosas en orden
+de coste antes de rendirse, y dice siempre cuál usó:
+
+1. **Leer la capa de texto.** El caso normal.
+2. **Descifrar.** Muchos PDF corporativos vienen cifrados con contraseña de
+   propietario vacía —restringen copiar e imprimir, no leer— y su texto está
+   entero. Es el rescate más barato que existe.
+3. **Transcribir.** Solo si de verdad no hay texto, y solo si el perfil lo pide.
+
+```yaml
+# profiles/coches.yaml
+ocr:
+  motor: tablas       # ninguno | tablas | texto
+  dpi: 200
+  max_paginas: 20
+  min_chars_por_pagina: 200
+```
+
+`tablas` conserva la rejilla del documento. En una ficha comparativa eso no es un
+lujo: una fila de equipamiento leída sin su columna afirma de **todas** las
+versiones lo que solo vale para una. `texto` (tesseract) es gratis y offline
+pero aplana, y lo avisa.
+
+Antes de transcribir nada, `make corpus` enseña cuántas páginas va a procesar y
+cuánto cuesta; el resultado se cachea por contenido del archivo, así que
+reajustar el troceado no vuelve a pagarlo. Una transcripción demasiado pobre para
+ser evidencia —un folleto cuyas páginas son mapas— se descarta con su motivo en
+vez de indexarse como ruido.
 
 ---
 
@@ -341,6 +374,7 @@ cuando ECS *acepta* la nueva definición, no cuando la tarea nueva *sirve*.
 
 ```bash
 # 4. Preparar el corpus de cada tema e ingestarlo en su Knowledge Base
+pip install -e ".[ingest]"      # dependencias de la ingesta (no van en la imagen)
 make corpus PROFILE=coches      # PDFs → fragmentos + metadatos
 make sync-kb PROFILE=coches     # sube a s3://…/coches/ y lanza la ingesta
 

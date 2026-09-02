@@ -32,6 +32,28 @@ preguntas:
     tipo: positiva
     documento_esperado: ficha-tecnica-4runner-hev
 
+  # --- contenido que solo existe gracias al rescate de PDFs ilegibles ---------
+  # El MG3 era un PDF de imagen: sin transcripción con estructura de tabla, este
+  # dato no está en el corpus. La segunda pregunta es la que de verdad mide el
+  # trabajo: pide una característica que solo tiene UNA de las cuatro versiones,
+  # y un OCR que aplanara la tabla la daría por buena para todas.
+  - id: C08
+    pregunta: "¿Cuánta potencia tiene el MG3 2026?"
+    tipo: positiva
+    documento_esperado: ficha-tecnica-mg-mg3
+
+  - id: C09
+    pregunta: "¿Qué versiones del MG3 2026 llevan quemacocos eléctrico?"
+    tipo: positiva
+    documento_esperado: ficha-tecnica-mg-mg3
+
+  # El Kia Sportage venía cifrado con AES: su texto estaba entero, solo había
+  # que descifrarlo. Sin eso, el documento no existía para el agente.
+  - id: C10
+    pregunta: "¿Qué motor tiene el Kia Sportage?"
+    tipo: positiva
+    documento_esperado: ficha-tecnica-kia-sportage
+
   # --- negativas: marcas y modelos que NO están en el corpus ------------------
   - id: C04
     pregunta: "¿Cuánta potencia tiene el Ferrari 296 GTB?"

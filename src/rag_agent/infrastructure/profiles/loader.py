@@ -18,12 +18,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ...domain.profile import ChunkPolicy, Profile, RetrievalPolicy
+from ...domain.profile import ChunkPolicy, OcrPolicy, Profile, RetrievalPolicy
 from ...domain.redaction import RedactionPolicy
 
 _CLAVES = {
     "slug", "name", "subject", "sources", "decline_phrase", "extra_rules",
-    "redaction", "retrieval", "chunking", "path_metadata", "banned_markers",
+    "redaction", "retrieval", "chunking", "ocr", "path_metadata", "banned_markers",
     "corpus", "knowledge_base_id",
 }
 _CLAVES_CORPUS = {"source", "prepared"}
@@ -73,6 +73,7 @@ def parse_profile(datos: dict[str, Any], *, origen: str = "<memoria>") -> Profil
 
     retrieval = _tramo(datos, "retrieval", {"top_k", "min_score"}, origen)
     chunking = _tramo(datos, "chunking", {"max_chars", "overlap_chars", "min_chars_to_split"}, origen)
+    ocr = _tramo(datos, "ocr", {"motor", "min_chars", "dpi", "max_paginas", "idioma", "min_chars_por_pagina"}, origen)
     corpus = _tramo(datos, "corpus", _CLAVES_CORPUS, origen)
 
     redaction = datos.get("redaction") or []
@@ -91,6 +92,7 @@ def parse_profile(datos: dict[str, Any], *, origen: str = "<memoria>") -> Profil
             redaction=RedactionPolicy(tuple(str(n) for n in redaction)),
             retrieval=RetrievalPolicy(**retrieval),
             chunking=ChunkPolicy(**chunking),
+            ocr=OcrPolicy(**ocr),
             path_metadata=tuple(str(p) for p in (datos.get("path_metadata") or [])),
             banned_markers=tuple(str(m) for m in (datos.get("banned_markers") or [])),
         )

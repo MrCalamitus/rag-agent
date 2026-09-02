@@ -49,6 +49,70 @@ class ChunkPolicy:
 
 
 @dataclass(frozen=True)
+class OcrPolicy:
+    """Qué hacer con un PDF del que no se puede extraer texto.
+
+    Vive en el dominio porque decide **qué llega a ser evidencia**. Un folleto
+    escaneado que se descarta en silencio es una pregunta que el agente
+    declinará para siempre sin que nadie sepa por qué; uno transcrito mal es
+    peor, porque el agente citará la transcripción como si fuera el original.
+
+    `motor` nombra un motor de extracción, no una biblioteca: la capa exterior
+    decide cuál lo cumple.
+
+    - `ninguno`  el documento se reporta como ilegible y no entra al corpus.
+    - `tablas`   extracción con estructura de tabla; conserva a qué columna
+                 (versión, modelo, plan) pertenece cada valor.
+    - `texto`    OCR lineal. Barato y offline, pero **aplana las tablas**: en un
+                 comparativo por versiones pierde la columna, y una fila leída
+                 sin su columna afirma de todas las versiones lo que solo vale
+                 para una.
+    """
+
+    motor: str = "ninguno"
+    # Por debajo de estos caracteres extraídos se considera que el PDF no tiene
+    # capa de texto y se recurre al OCR.
+    min_chars: int = 200
+    # Resolución de rasterizado. 200 ppp es el punto donde los números de una
+    # ficha técnica se leen sin que la página pese de más.
+    dpi: int = 200
+    # Tope de páginas por documento. Los motores en la nube cobran por página:
+    # un tope evita que un manual de 400 páginas se convierta en una factura.
+    max_paginas: int = 40
+    idioma: str = "spa"
+    # Caracteres por página por debajo de los cuales la transcripción se
+    # considera fallida. No es un ajuste de calidad: es la diferencia entre
+    # evidencia y ruido. Un folleto cuyas páginas son mapas devuelve el mismo
+    # pie de página repetido, y ese documento indexado solo puede hacer daño —
+    # el agente lo citaría como si respondiera a la pregunta. Medido sobre
+    # fichas reales: 7.500-10.000 caracteres por página cuando hay contenido,
+    # 60 cuando no. El umbral está en mitad de dos órdenes de magnitud.
+    min_chars_por_pagina: int = 200
+
+    MOTORES = ("ninguno", "tablas", "texto")
+
+    def __post_init__(self) -> None:
+        if self.motor not in self.MOTORES:
+            raise ValueError(
+                f"motor de OCR desconocido: '{self.motor}'. Válidos: {list(self.MOTORES)}"
+            )
+        if self.dpi < 72:
+            raise ValueError("dpi por debajo de 72 no deja texto legible")
+        if self.max_paginas <= 0:
+            raise ValueError("max_paginas debe ser positivo")
+        if self.min_chars_por_pagina < 0:
+            raise ValueError("min_chars_por_pagina no puede ser negativo")
+
+    @property
+    def activo(self) -> bool:
+        return self.motor != "ninguno"
+
+    @property
+    def conserva_tablas(self) -> bool:
+        return self.motor == "tablas"
+
+
+@dataclass(frozen=True)
 class RetrievalPolicy:
     """Cuánta evidencia se recupera y con qué piso de relevancia."""
 
@@ -82,6 +146,7 @@ class Profile:
     redaction: RedactionPolicy = field(default_factory=RedactionPolicy.ninguna)
     retrieval: RetrievalPolicy = field(default_factory=RetrievalPolicy)
     chunking: ChunkPolicy = field(default_factory=ChunkPolicy)
+    ocr: OcrPolicy = field(default_factory=OcrPolicy)
     # Segmentos de la ruta del corpus que se convierten en metadatos. Con
     # `corpus/coches/toyota/hilux.pdf` y `("tema", "marca")` el fragmento sale
     # con `tema=coches, marca=toyota`, que es lo que permite filtrar y lo que

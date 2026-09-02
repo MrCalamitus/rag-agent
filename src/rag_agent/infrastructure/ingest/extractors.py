@@ -7,7 +7,14 @@ nuevo no tiene que declarar qué extractores usar — le sirven todos, y ninguno
 se activa donde no toca.
 
 El extractor genérico de PDF es el que sostiene el caso general: un folleto de
-coche, un informe de inversiones o cualquier documento con capa de texto.
+coche, un informe de inversiones o cualquier documento con capa de texto. Cuando
+esa capa no existe o está cifrada, hay dos recursos antes de darse por vencido:
+
+1. **Descifrar.** Muchos PDF corporativos vienen con cifrado AES y contraseña de
+   propietario vacía —restringen copiar e imprimir, no leer— y su texto está
+   ahí, entero. Es el rescate más barato que existe: seis fichas de este corpus
+   volvieron con 14.000-19.000 caracteres cada una sin transcribir nada.
+2. **Transcribir.** Solo si de verdad no hay texto. Ver `ocr/`.
 """
 
 from __future__ import annotations
@@ -46,28 +53,70 @@ def limpiar(paginas: list[str]) -> str:
     return "\n".join(colapsadas).strip()
 
 
-def pdf(ruta: Path, *, banned: tuple[str, ...] = ()) -> Documento | None:
+def pdf(
+    ruta: Path,
+    *,
+    banned: tuple[str, ...] = (),
+    ocr=None,
+    min_chars: int = MINIMO_TEXTO,
+    **_,
+) -> Documento | None:
+    """Texto del PDF: capa nativa, descifrando si hace falta, y OCR como respaldo.
+
+    `ocr` es un invocable `Path -> ResultadoOcr | None`. Se le pasa el documento
+    entero y no las páginas ya rasterizadas porque quien lo provee es el
+    pipeline, que es el que sabe del caché y del tope de páginas.
+    """
     try:
         from pypdf import PdfReader
     except ImportError:
-        print("Falta pypdf: pip install pypdf", file=sys.stderr)
+        print('Falta pypdf: pip install -e ".[ingest]"', file=sys.stderr)
         raise SystemExit(2)
 
-    paginas = [p.extract_text() or "" for p in PdfReader(ruta).pages]
+    lector = PdfReader(ruta)
+    cifrado = bool(lector.is_encrypted)
+    if cifrado:
+        # Contraseña vacía: el caso habitual del PDF que restringe copiar e
+        # imprimir pero no leer. Si tampoco así se abre, se deja que falle: un
+        # documento realmente protegido no debe entrar al corpus a la fuerza.
+        lector.decrypt("")
+
+    paginas = [p.extract_text() or "" for p in lector.pages]
     texto = limpiar(paginas)
+    origen = "capa de texto"
+    confianza = None
+
+    if len(texto) < min_chars and ocr is not None:
+        transcrito = ocr(ruta)
+        if transcrito is not None and len(transcrito.texto.strip()) >= min_chars:
+            texto = transcrito.texto.strip()
+            origen = f"ocr:{transcrito.motor}"
+            confianza = transcrito.confianza
 
     if (marcador := marcador_vetado(texto, banned)):
         raise VetadoError(marcador)
-    if len(texto) < MINIMO_TEXTO:
+    if len(texto) < min_chars:
         return None
 
-    metadata: dict = {"tipo": clasificar(ruta.stem), "fuente": ruta.name, "paginas": len(paginas)}
+    metadata: dict = {
+        "tipo": clasificar(ruta.stem),
+        "fuente": ruta.name,
+        "paginas": len(paginas),
+        # De dónde salió el texto viaja con el fragmento: una cita que procede
+        # de una transcripción automática no vale lo mismo que una del original,
+        # y quien audite la respuesta tiene derecho a saberlo sin abrir el PDF.
+        "origen_texto": origen,
+    }
+    if cifrado:
+        metadata["cifrado_original"] = True
+    if confianza is not None:
+        metadata["ocr_confianza"] = confianza
     if (anio := anio_en(slug(ruta.stem))):
         metadata["anio"] = anio
     return Documento(nombre=f"{slug(ruta.stem)}.md", texto=f"# {ruta.stem}\n\n{texto}\n", metadata=metadata)
 
 
-def cedula_electronica(ruta: Path, *, banned: tuple[str, ...] = ()) -> Documento | None:
+def cedula_electronica(ruta: Path, *, banned: tuple[str, ...] = (), **_) -> Documento | None:
     """Cédula profesional electrónica de la SEP (XML firmado).
 
     Se prefiere el XML al PDF: el PDF trae el mismo dato entre sellos en
@@ -125,7 +174,9 @@ y presupone el título correspondiente expedido por la institución educativa.
     )
 
 
-def actividad_github(ruta: Path, *, incluir_repos: bool = False, banned: tuple[str, ...] = ()) -> Documento | None:
+def actividad_github(
+    ruta: Path, *, incluir_repos: bool = False, banned: tuple[str, ...] = (), **_
+) -> Documento | None:
     """Perfil público de GitHub: actividad de desarrollo por año.
 
     Los nombres de repositorio privados quedan fuera salvo petición explícita:
@@ -190,7 +241,7 @@ titulación ni certificación alguna.
     )
 
 
-def texto_plano(ruta: Path, *, banned: tuple[str, ...] = ()) -> Documento | None:
+def texto_plano(ruta: Path, *, banned: tuple[str, ...] = (), **_) -> Documento | None:
     """Markdown o texto ya legible: entra tal cual, con sus metadatos laterales."""
     contenido = ruta.read_text(encoding="utf-8").strip()
     if (marcador := marcador_vetado(contenido, banned)):

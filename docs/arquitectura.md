@@ -118,6 +118,7 @@ src/rag_agent/
 │   ├── container.py            # composición de dependencias
 │   ├── profiles/               # carga de profiles/*.yaml y registro de temas
 │   ├── ingest/                 # originales → fragmentos + metadatos
+│   │   └── ocr/                # rescate de PDFs sin capa de texto
 │   ├── inbound/
 │   │   ├── http/               # FastAPI, esquema, SSE, auth, límite de tasa
 │   │   └── cli/                # menú interactivo y asistente de configuración
@@ -189,6 +190,28 @@ un filtro mal puesto devolvería fichas de coches a una pregunta sobre títulos.
 El tema se elige por petición con la cabecera `X-Rag-Profile`. Va en cabecera y
 no en el cuerpo porque el cuerpo es el de Open Responses, que rechaza campos
 desconocidos: un cliente estándar sigue funcionando y recibe el tema por defecto.
+
+### La ingesta y los PDFs que no se dejan leer
+
+Un corpus real trae documentos ilegibles, y descartarlos en silencio deja
+preguntas que el agente declinará para siempre sin que nadie sepa por qué. La
+ingesta intenta tres cosas en orden de coste: leer la capa de texto, descifrar
+el PDF si viene con contraseña de propietario vacía, y transcribirlo.
+
+El protocolo `MotorOcr` vive en `ingest/ocr/` y **no** en `application/ports.py`:
+el servicio nunca hace OCR. Meter en los puertos del núcleo algo que el núcleo
+no usa sería ensuciar la frontera que el resto del proyecto defiende.
+
+Dos motores, y la diferencia importa más de lo que parece. `tablas` conserva la
+rejilla del documento; `texto` es gratis y offline pero la aplana. Sobre una
+ficha comparativa —filas de características, columnas de versiones— aplanar no
+produce un resultado incompleto sino uno **falso**: una fila que solo aplica a
+una versión queda escrita como si aplicara a todas. Por eso el motor se elige en
+el perfil y el que aplana lo avisa por escrito.
+
+Cada fragmento lleva de dónde salió su texto (`origen_texto`, `ocr_confianza`,
+`cifrado_original`): una cita que procede de una transcripción automática no
+vale lo mismo que una del original.
 
 ### El menú como adaptador de entrada
 
@@ -263,6 +286,7 @@ las pruebas de contrato dejarían de decir algo sobre el otro.
 | E6 — Observabilidad | ◐ logs JSON, métricas por filtro, panel y dos alarmas desplegados; falta X-Ray |
 | E7 — Evaluación | ◐ 14 preguntas contra el despliegue con RAG real (Sonnet 14/14); faltan 6 para las 20 del plan |
 | E8 — RAG general reutilizable | ◐ temas por YAML, ingesta genérica de PDF con troceado, menú interactivo y N Knowledge Bases; falta desplegar la topología multi-tema |
+| E9 — Rescate de PDFs ilegibles | ✅ descifrado, transcripción con estructura de tabla, caché y guardas de densidad; 30 documentos ilegibles → 22 rescatados y 8 rechazados con motivo |
 
 **Inferencia real conectada.** El servicio ya corre contra Bedrock sin
 infraestructura: `RAG_INFERENCE_BACKEND=bedrock` con la recuperación local.

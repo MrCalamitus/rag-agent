@@ -38,6 +38,17 @@ retrieval:
   # Con un corpus grande los scores sí se separan, así que el piso ya rinde.
   min_score: 0.35
 
+# Muchas fichas son PDF de imagen: el texto no se puede extraer. `tablas` las
+# transcribe conservando la rejilla, que aquí no es un lujo — una fila de
+# equipamiento leída sin su columna afirma de todas las versiones lo que solo
+# vale para una.
+ocr:
+  motor: tablas
+  min_chars: 200
+  dpi: 200
+  max_paginas: 20
+  idioma: spa
+
 chunking:
   max_chars: 2000
   overlap_chars: 250

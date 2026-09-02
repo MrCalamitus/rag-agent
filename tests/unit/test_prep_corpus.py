@@ -170,3 +170,140 @@ def test_escribir_deja_el_corpus_listo_para_la_recuperacion_local(tmp_path):
     assert (destino / "nota.md").is_file()
     assert (destino / "nota.md.metadata.json").is_file()
     assert (destino / "manifiesto.csv").is_file()
+
+
+# --- transcripción de PDFs sin capa de texto ----------------------------------
+
+
+class MotorFalso:
+    """Motor de OCR programable: estas pruebas miden las reglas del pipeline,
+    no la calidad de un servicio externo."""
+
+    nombre = "tablas"
+
+    def __init__(self, por_pagina: list[str], fallar_paginas: int = 0):
+        self._por_pagina = por_pagina
+        self._fallar = fallar_paginas
+        self.llamadas = 0
+
+    def disponible(self):
+        return True, ""
+
+    def paginas_por_documento(self, total):
+        return total
+
+    def extraer(self, imagenes, *, idioma="spa"):
+        from rag_agent.infrastructure.ingest.ocr import PaginaExtraida, ResultadoOcr
+
+        self.llamadas += 1
+        resultado = ResultadoOcr(motor=self.nombre)
+        for numero, _ in enumerate(imagenes, start=1):
+            if numero <= self._fallar:
+                resultado.avisos.append(f"página {numero}: ConnectionClosedError")
+                continue
+            resultado.paginas.append(
+                PaginaExtraida(numero=numero, texto=self._por_pagina[numero - 1], confianza=95.0)
+            )
+        return resultado
+
+
+def _transcriptor(motor, tmp_path, policy, reporte=None):
+    from rag_agent.infrastructure.ingest.pipeline import Reporte, Transcriptor
+
+    return Transcriptor(motor, policy, tmp_path / "cache", reporte=reporte or Reporte())
+
+
+def _pdf_de_una_pagina(destino):
+    """Un PDF mínimo válido, sin capa de texto."""
+    pypdfium2 = pytest.importorskip("pypdfium2")
+    doc = pypdfium2.PdfDocument.new()
+    doc.new_page(200, 200)
+    doc.save(str(destino))
+    return destino
+
+
+def test_una_transcripcion_pobre_se_descarta_en_vez_de_indexarse(tmp_path, monkeypatch):
+    """Un PDF de catorce páginas del que salen 900 caracteres no se transcribió
+    mal: no contiene lo que su nombre promete. Indexarlo es peor que
+    descartarlo, porque el agente lo citaría para responder algo que no dice."""
+    from rag_agent.domain.profile import OcrPolicy
+    from rag_agent.infrastructure.ingest import pipeline
+    from rag_agent.infrastructure.ingest.pipeline import Reporte
+
+    ruta = _pdf_de_una_pagina(tmp_path / "folleto.pdf")
+    monkeypatch.setattr(pipeline, "rasterizar", lambda *a, **k: [b"x"])
+    monkeypatch.setattr(pipeline, "contar_paginas", lambda *a, **k: 1)
+    reporte = Reporte()
+    motor = MotorFalso(["texto muy corto"])
+
+    resultado = _transcriptor(motor, tmp_path, OcrPolicy(motor="tablas"), reporte)(ruta)
+
+    assert resultado is None
+    assert any("descartada" in a for a in reporte.avisos)
+    assert reporte.transcritos == []
+
+
+def test_una_transcripcion_densa_se_acepta(tmp_path, monkeypatch):
+    from rag_agent.domain.profile import OcrPolicy
+    from rag_agent.infrastructure.ingest import pipeline
+    from rag_agent.infrastructure.ingest.pipeline import Reporte
+
+    ruta = _pdf_de_una_pagina(tmp_path / "ficha.pdf")
+    monkeypatch.setattr(pipeline, "rasterizar", lambda *a, **k: [b"x"])
+    monkeypatch.setattr(pipeline, "contar_paginas", lambda *a, **k: 1)
+    reporte = Reporte()
+
+    resultado = _transcriptor(MotorFalso(["dato " * 400]), tmp_path, OcrPolicy(motor="tablas"), reporte)(ruta)
+
+    assert resultado is not None
+    assert reporte.transcritos == [("ficha.pdf", "tablas", 95.0)]
+
+
+def test_una_transcripcion_incompleta_no_se_cachea(tmp_path, monkeypatch):
+    """Guardar un resultado parcial convierte un fallo de red pasajero en la
+    versión definitiva del documento, y nadie volvería a mirarlo."""
+    from rag_agent.domain.profile import OcrPolicy
+    from rag_agent.infrastructure.ingest import pipeline
+    from rag_agent.infrastructure.ingest.pipeline import Reporte
+
+    ruta = _pdf_de_una_pagina(tmp_path / "ficha.pdf")
+    monkeypatch.setattr(pipeline, "rasterizar", lambda *a, **k: [b"x", b"y"])
+    monkeypatch.setattr(pipeline, "contar_paginas", lambda *a, **k: 2)
+    reporte = Reporte()
+    motor = MotorFalso(["", "dato " * 400], fallar_paginas=1)
+    transcribir = _transcriptor(motor, tmp_path, OcrPolicy(motor="tablas"), reporte)
+
+    transcribir(ruta)
+    transcribir(ruta)
+
+    assert motor.llamadas == 2, "un resultado incompleto debe reintentarse"
+    assert any("incompleta" in a for a in reporte.avisos)
+
+
+def test_una_transcripcion_completa_se_cachea_y_no_se_vuelve_a_pagar(tmp_path, monkeypatch):
+    from rag_agent.domain.profile import OcrPolicy
+    from rag_agent.infrastructure.ingest import pipeline
+    from rag_agent.infrastructure.ingest.pipeline import Reporte
+
+    ruta = _pdf_de_una_pagina(tmp_path / "ficha.pdf")
+    monkeypatch.setattr(pipeline, "rasterizar", lambda *a, **k: [b"x"])
+    monkeypatch.setattr(pipeline, "contar_paginas", lambda *a, **k: 1)
+    motor = MotorFalso(["dato " * 400])
+    transcribir = _transcriptor(motor, tmp_path, OcrPolicy(motor="tablas"), Reporte())
+
+    transcribir(ruta)
+    transcribir(ruta)
+
+    assert motor.llamadas == 1
+
+
+def test_sin_ocr_un_pdf_ilegible_dice_como_activarlo(tmp_path, monkeypatch):
+    """El reporte tiene que decir qué hacer, no solo que algo falló."""
+    from rag_agent.infrastructure.ingest import pipeline
+
+    ruta = _pdf_de_una_pagina(tmp_path / "escaneado.pdf")
+    assert ruta.exists()
+
+    reporte = preparar(tmp_path, PUBLICO)
+
+    assert any("ocr.motor" in motivo for _, motivo in reporte.sin_texto)

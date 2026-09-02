@@ -23,7 +23,14 @@ sys.path.insert(0, str(RAIZ / "src"))
 
 from rag_agent.infrastructure.ingest import DestinoInvalido, escribir, preparar  # noqa: E402
 from rag_agent.infrastructure.ingest.extractors import EXTENSIONES  # noqa: E402
+from rag_agent.infrastructure.ingest.pipeline import escanear_ocr  # noqa: E402
 from rag_agent.infrastructure.profiles import ProfileError, load_profiles  # noqa: E402
+
+# Precio de lista de Textract AnalyzeDocument (TABLES) por 1.000 páginas en
+# us-east-1 cuando se escribió esto. Está aquí y no escondido para que se pueda
+# corregir de un vistazo: lo que no cambia es que conviene ver el número de
+# páginas ANTES de lanzar el lote, no a mitad.
+USD_POR_1000_PAGINAS = 15.0
 
 
 def _ruta(valor: str | None) -> Path | None:
@@ -42,6 +49,13 @@ def main() -> int:
     )
     parser.add_argument("--skip", nargs="*", default=[], help="Patrones a omitir del origen")
     parser.add_argument("--dry-run", action="store_true", help="Analiza sin escribir nada")
+    parser.add_argument(
+        "--no-ocr", action="store_true",
+        help="No transcribir los PDF sin capa de texto (se reportan y se omiten)",
+    )
+    parser.add_argument(
+        "--yes", "-y", action="store_true", help="No preguntar antes de transcribir",
+    )
     args = parser.parse_args()
 
     try:
@@ -72,10 +86,29 @@ def main() -> int:
     print(f"Origen : {origen}")
     print(f"Destino: {destino}\n")
 
-    reporte = preparar(origen, binding.profile, patrones=tuple(args.only), omitir=tuple(args.skip))
+    # El caché vive junto al corpus preparado y no dentro del origen: la carpeta
+    # de documentos es del usuario y no debe llenarse de archivos nuestros.
+    carpeta_cache = destino.parent / ".ocr-cache"
+    usar_ocr = not args.no_ocr and binding.profile.ocr.activo
+    if usar_ocr and not _confirmar_ocr(origen, binding, carpeta_cache, asumir_si=args.yes or args.dry_run):
+        usar_ocr = False
+
+    reporte = preparar(
+        origen,
+        binding.profile,
+        patrones=tuple(args.only),
+        omitir=tuple(args.skip),
+        carpeta_cache=carpeta_cache,
+        ocr=usar_ocr,
+    )
 
     for nombre, marcador in reporte.vetados:
         print(f"  ⛔ {nombre}: contiene «{marcador}» → EXCLUIDO por el perfil")
+    for nombre, motor, confianza in reporte.transcritos:
+        marca = f" (confianza {confianza}%)" if confianza is not None else ""
+        print(f"  ⎋ {nombre}: transcrito con «{motor}»{marca}")
+    for aviso in reporte.avisos:
+        print(f"  ⚠ {aviso}")
     for nombre, detalle in reporte.errores:
         print(f"  ✗ {nombre}: no se pudo leer → {detalle}")
     for nombre, motivo in reporte.sin_texto:
@@ -100,10 +133,56 @@ def main() -> int:
     for fragmento in reporte.fragmentos:
         print(f"  ✔ {fragmento.nombre}  ({len(fragmento.texto)} caracteres)")
     print(
-        f"\n{reporte.documentos} documento(s) → {reporte.total_fragmentos} fragmento(s) en {destino}\n"
-        f"Siguiente paso:  make sync-kb PROFILE={binding.slug}"
+        f"\n{reporte.documentos} documento(s) → {reporte.total_fragmentos} fragmento(s) en {destino}"
     )
+    if reporte.transcritos:
+        print(f"{len(reporte.transcritos)} de ellos rescatados por transcripción.")
+    print(f"Siguiente paso:  make sync-kb PROFILE={binding.slug}")
     return 0
+
+
+def _confirmar_ocr(origen, binding, carpeta_cache, *, asumir_si: bool) -> bool:
+    """Enseña qué se va a transcribir y cuánto cuesta, y pide permiso.
+
+    El motor en la nube cobra por página. Enterarse del gasto a mitad de un lote
+    de cien no sirve de nada, y un `make corpus` no debería poder sorprender a
+    nadie con una factura.
+    """
+    candidatos = escanear_ocr(origen, binding.profile, carpeta_cache)
+    if not candidatos:
+        return True
+
+    pendientes = [c for c in candidatos if not c.en_cache]
+    cacheados = len(candidatos) - len(pendientes)
+    paginas = sum(c.paginas for c in pendientes)
+
+    print(f"  {len(candidatos)} PDF sin capa de texto:")
+    for c in candidatos[:8]:
+        estado = "en caché" if c.en_cache else f"{c.paginas} pág."
+        print(f"    · {c.ruta.name}  ({estado})")
+    if len(candidatos) > 8:
+        print(f"    · … y {len(candidatos) - 8} más")
+    if cacheados:
+        print(f"  {cacheados} ya transcritos antes: no se vuelven a procesar ni a pagar.")
+    if not pendientes:
+        print()
+        return True
+
+    print(f"\n  A transcribir: {len(pendientes)} documento(s), {paginas} página(s), "
+          f"motor «{binding.profile.ocr.motor}».")
+    if binding.profile.ocr.motor == "tablas":
+        print(f"  Costo estimado: ~{paginas / 1000 * USD_POR_1000_PAGINAS:.2f} USD "
+              f"(Textract, {USD_POR_1000_PAGINAS:.0f} USD/1.000 páginas).")
+    if asumir_si:
+        print()
+        return True
+    try:
+        respuesta = input("  ¿Transcribir? [S/n]: ").strip().lower()
+    except (KeyboardInterrupt, EOFError):
+        print()
+        return False
+    print()
+    return respuesta in ("", "s", "si", "sí", "y", "yes")
 
 
 if __name__ == "__main__":
