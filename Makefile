@@ -2,7 +2,7 @@
 SHELL := /bin/bash
 PY ?= .venv/bin/python
 PIP ?= .venv/bin/pip
-IMAGE ?= luis-cv/api:local
+IMAGE ?= rag-agent/api:local
 
 .DEFAULT_GOAL := help
 
@@ -18,9 +18,21 @@ help: ## Muestra esta ayuda
 .PHONY: install
 install: .venv ## Crea el entorno e instala dependencias
 
+.PHONY: menu
+menu: .venv ## Menú interactivo: configurar, preparar, probar y desplegar
+	$(PY) -m rag_agent.infrastructure.inbound.cli.menu
+
+.PHONY: init
+init: .venv ## Asistente de configuración: nombres, cuenta AWS y primer tema
+	$(PY) -m rag_agent.infrastructure.inbound.cli.menu init
+
+.PHONY: estado
+estado: .venv ## Qué está configurado y qué falta
+	$(PY) -m rag_agent.infrastructure.inbound.cli.menu estado
+
 .PHONY: run
 run: .venv ## Levanta la API en local (adaptadores locales, sin AWS)
-	.venv/bin/uvicorn luis_cv.main:app --reload --port 8080
+	.venv/bin/uvicorn rag_agent.main:app --reload --port 8080
 
 .PHONY: test
 test: .venv ## Suite completa en local: contrato + RAG + operación
@@ -36,7 +48,7 @@ test-rag: .venv ## Solo los casos C: recuperación y veracidad
 
 .PHONY: test-real
 test-real: .venv ## Casos C contra el modelo real de Bedrock (usa .env)
-	AWS_PROFILE=$${AWS_PROFILE:-luis} LUISCV_INFERENCE_BACKEND=bedrock $(PY) -m pytest -q tests/rag
+	AWS_PROFILE=$${AWS_PROFILE:-luis} RAG_INFERENCE_BACKEND=bedrock $(PY) -m pytest -q tests/rag
 
 .PHONY: test-deployed
 test-deployed: .venv ## La misma suite contra el ALB (exige BASE_URL y API_TOKEN)
@@ -44,19 +56,20 @@ test-deployed: .venv ## La misma suite contra el ALB (exige BASE_URL y API_TOKEN
 	$(PY) -m pytest -q -m deployed
 
 .PHONY: eval
-eval: .venv ## Preguntas de oro y reporte comparativo (GOLDEN=ruta, MODELS=alias)
+eval: .venv ## Preguntas de oro y reporte (PROFILE=tema, GOLDEN=ruta, MODELS=alias)
 	$(PY) scripts/eval.py --models $${MODELS:-agente-rag-sonnet} \
-		$${GOLDEN:+--golden $$GOLDEN}
+		--golden $${GOLDEN:-tests/golden$${PROFILE:+-$$PROFILE}.yaml}
 
 .PHONY: corpus
-corpus: .venv ## Prepara el corpus (SOURCE=carpeta OUT=destino, fuera del repo)
-	@test -n "$$SOURCE" -a -n "$$OUT" || (echo "Uso: make corpus SOURCE=~/docs OUT=~/docs/corpus" && exit 1)
-	$(PY) scripts/prep_corpus.py --source $$SOURCE --out $$OUT \
-		$${TRANSCRIPCIONES:+--transcripciones $$TRANSCRIPCIONES} $${SKIP:+--skip $$SKIP}
+corpus: .venv ## Prepara el corpus de un tema (PROFILE=slug; SOURCE/OUT opcionales)
+	@test -n "$$PROFILE" || (echo "Uso: make corpus PROFILE=coches" && exit 1)
+	$(PY) scripts/prep_corpus.py --profile $$PROFILE \
+		$${SOURCE:+--source $$SOURCE} $${OUT:+--out $$OUT} $${SKIP:+--skip $$SKIP}
 
 .PHONY: sync-kb
-sync-kb: ## Sube el corpus a S3 y lanza la ingesta (CORPUS=ruta)
-	./scripts/sync-kb.sh $${CORPUS:-$$LUISCV_CORPUS_DIR}
+sync-kb: ## Sube el corpus de un tema a S3 y lanza la ingesta (PROFILE=slug)
+	@test -n "$$PROFILE" -o -n "$$CORPUS" || (echo "Uso: make sync-kb PROFILE=coches" && exit 1)
+	RAG_PROFILE=$$PROFILE ./scripts/sync-kb.sh $$CORPUS
 
 .PHONY: smoke
 smoke: ## Verificación rápida contra el desplegado

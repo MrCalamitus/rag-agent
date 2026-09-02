@@ -34,7 +34,7 @@ import yaml
 RAIZ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RAIZ / "src"))
 
-from luis_cv.domain.prompts import is_denial as declina  # noqa: E402
+from rag_agent.domain.prompts import is_denial as declina  # noqa: E402
 
 
 @dataclass
@@ -51,15 +51,19 @@ class Resultado:
 
 
 @contextlib.contextmanager
-def app_local(corpus: str):
+def app_local(corpus: str, perfil: str | None = None):
     """Levanta la aplicación con los adaptadores locales, en un hilo."""
     import uvicorn
 
-    os.environ.setdefault("LUISCV_API_TOKEN", "local-dev-token")
-    os.environ.setdefault("LUISCV_LOG_LEVEL", "WARNING")
-    os.environ["LUISCV_CORPUS_DIR"] = corpus
+    os.environ.setdefault("RAG_API_TOKEN", "local-dev-token")
+    os.environ.setdefault("RAG_LOG_LEVEL", "WARNING")
+    os.environ["RAG_CORPUS_DIR"] = corpus
+    if perfil:
+        # Evaluar con un perfil distinto del activo es lo normal: las preguntas
+        # de oro de un tema no dicen nada de otro.
+        os.environ["RAG_DEFAULT_PROFILE"] = perfil
 
-    from luis_cv.infrastructure.inbound.http.app import create_app
+    from rag_agent.infrastructure.inbound.http.app import create_app
 
     with contextlib.closing(socket.socket()) as s:
         s.bind(("127.0.0.1", 0))
@@ -71,15 +75,20 @@ def app_local(corpus: str):
     while not servidor.started:
         time.sleep(0.02)
     try:
-        yield f"http://127.0.0.1:{puerto}", os.environ["LUISCV_API_TOKEN"]
+        yield f"http://127.0.0.1:{puerto}", os.environ["RAG_API_TOKEN"]
     finally:
         servidor.should_exit = True
         hilo.join(timeout=10)
 
 
-def preguntar(cliente: httpx.Client, base: str, token: str, modelo: str, pregunta: str):
+def preguntar(
+    cliente: httpx.Client, base: str, token: str, modelo: str, pregunta: str,
+    perfil: str | None = None,
+):
     cuerpo = {"model": modelo, "input": pregunta, "stream": True}
     cabeceras = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    if perfil:
+        cabeceras["X-Rag-Profile"] = perfil
     inicio = time.perf_counter()
     ttft = float("nan")
     texto: list[str] = []
@@ -102,6 +111,27 @@ def preguntar(cliente: httpx.Client, base: str, token: str, modelo: str, pregunt
                 if item["type"].endswith("knowledge_search"):
                     documentos = [r_["document_id"] for r_ in item["results"]]
     return "".join(texto), documentos, ttft, time.perf_counter() - inicio
+
+
+def _documento_base(document_id: str) -> str:
+    """`ficha-tecnica-hilux--003.md` → `ficha-tecnica-hilux`.
+
+    Un archivo de oro que fije el número de fragmento se rompe en cuanto se
+    reingiere el corpus con otro tamaño de troceado, y el fallo parece del
+    agente cuando es del propio archivo. Se compara por documento de origen.
+    """
+    return document_id.removesuffix(".md").split("--")[0]
+
+
+def _recuperado(esperado: str, documentos: list[str]) -> bool:
+    base = _documento_base(esperado)
+    return any(_documento_base(d) == base for d in documentos)
+
+
+def _citado(esperado: str, respuesta: str, documentos: list[str]) -> bool:
+    base = _documento_base(esperado)
+    citas = [d for d in documentos if _documento_base(d) == base]
+    return any(f"[{cita}]" in respuesta for cita in citas or [esperado])
 
 
 def evaluar(caso: dict, respuesta: str, documentos: list[str]) -> tuple[bool, str]:
@@ -128,7 +158,7 @@ def evaluar(caso: dict, respuesta: str, documentos: list[str]) -> tuple[bool, st
         return (negada, "niega como debe" if negada else "NO negó: posible invención")
 
     esperado = caso.get("documento_esperado")
-    if esperado and esperado not in documentos:
+    if esperado and not _recuperado(esperado, documentos):
         return False, f"no recuperó {esperado}"
 
     if tipo == "enmascarada":
@@ -136,13 +166,13 @@ def evaluar(caso: dict, respuesta: str, documentos: list[str]) -> tuple[bool, st
         # que existe y negarse a transcribirlo. Ambas cumplen el §6.2. Lo que
         # falla es afirmar que no consta teniendo el documento delante, y eso
         # se detecta por la ausencia de cita, no por el tono de la respuesta.
-        if esperado and f"[{esperado}]" not in respuesta:
+        if esperado and not _citado(esperado, respuesta, documentos):
             return False, f"tiene {esperado} pero no lo citó al responder"
         return True, "confirma la credencial sin transcribir el identificador"
 
-    if negada and esperado and f"[{esperado}]" not in respuesta:
+    if negada and esperado and not _citado(esperado, respuesta, documentos):
         return False, "declinó teniendo la evidencia recuperada"
-    if f"[{esperado}]" not in respuesta:
+    if esperado and not _citado(esperado, respuesta, documentos):
         return False, f"recuperó {esperado} pero no lo citó"
     return True, "fundamentada y citada"
 
@@ -178,16 +208,20 @@ def main() -> int:
     parser.add_argument("--token", default=os.getenv("API_TOKEN", "local-dev-token"))
     parser.add_argument("--golden", default=str(RAIZ / "tests" / "golden.yaml"))
     parser.add_argument("--models", default="agente-rag-sonnet")
+    parser.add_argument(
+        "--profile", help="Tema a evaluar. Por defecto, el que declare el archivo de oro."
+    )
     parser.add_argument("--out", default=str(RAIZ / "reports"))
     args = parser.parse_args()
 
     golden = yaml.safe_load(Path(args.golden).read_text(encoding="utf-8"))
     modelos = [m.strip() for m in args.models.split(",") if m.strip()]
 
+    perfil = args.profile or golden.get("perfil")
     contexto = (
         contextlib.nullcontext((args.base_url, args.token))
         if args.base_url
-        else app_local(golden.get("corpus", "corpus"))
+        else app_local(golden.get("corpus", "corpus"), perfil)
     )
     resultados: list[Resultado] = []
     with contexto as (base, token), httpx.Client() as cliente:
@@ -195,7 +229,7 @@ def main() -> int:
         for modelo in modelos:
             for caso in golden["preguntas"]:
                 respuesta, documentos, ttft, total = preguntar(
-                    cliente, base, token, modelo, caso["pregunta"]
+                    cliente, base, token, modelo, caso["pregunta"], perfil
                 )
                 correcto, motivo = evaluar(caso, respuesta, documentos)
                 resultados.append(

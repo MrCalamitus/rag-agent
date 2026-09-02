@@ -91,8 +91,8 @@ ALIAS_SIN_ACCESO="$(
   AWS_REGION="$REGION" "$RAIZ/.venv/bin/python" - <<'PYCHECK' 2>/dev/null || true
 import os, sys
 sys.path.insert(0, os.path.join(os.environ.get("RAIZ", "."), "src"))
-from luis_cv.infrastructure.config import Settings
-from luis_cv.infrastructure.container import build_catalog
+from rag_agent.infrastructure.config import Settings
+from rag_agent.infrastructure.container import build_catalog
 ajustes = Settings(inference_backend="bedrock", aws_profile=os.environ.get("AWS_PROFILE"),
                    aws_region=os.environ["AWS_REGION"], _env_file=None)
 print(",".join(build_catalog(ajustes).verify_access()))

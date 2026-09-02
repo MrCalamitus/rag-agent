@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from luis_cv.application.ports import (
+from rag_agent.application.ports import (
     ClockPort,
     IdGeneratorPort,
     KnowledgeBasePort,
@@ -22,14 +22,14 @@ from luis_cv.application.ports import (
     ModelDescriptor,
     TelemetryPort,
 )
-from luis_cv.infrastructure.outbound.bedrock.knowledge_base import BedrockKnowledgeBase
-from luis_cv.infrastructure.outbound.bedrock.language_model import BedrockLanguageModel
-from luis_cv.infrastructure.outbound.local.clock import SystemClock
-from luis_cv.infrastructure.outbound.local.corpus_knowledge_base import LocalCorpusKnowledgeBase
-from luis_cv.infrastructure.outbound.local.grounded_stub_model import GroundedStubLanguageModel
-from luis_cv.infrastructure.outbound.local.ids import UuidGenerator
-from luis_cv.infrastructure.outbound.model_catalog import BedrockModelCatalog, StaticModelCatalog
-from luis_cv.infrastructure.outbound.telemetry.structured import StructuredTelemetry
+from rag_agent.infrastructure.outbound.bedrock.knowledge_base import BedrockKnowledgeBase
+from rag_agent.infrastructure.outbound.bedrock.language_model import BedrockLanguageModel
+from rag_agent.infrastructure.outbound.local.clock import SystemClock
+from rag_agent.infrastructure.outbound.local.corpus_knowledge_base import LocalCorpusKnowledgeBase
+from rag_agent.infrastructure.outbound.local.grounded_stub_model import GroundedStubLanguageModel
+from rag_agent.infrastructure.outbound.local.ids import UuidGenerator
+from rag_agent.infrastructure.outbound.model_catalog import BedrockModelCatalog, StaticModelCatalog
+from rag_agent.infrastructure.outbound.telemetry.structured import StructuredTelemetry
 
 from ..support.fakes import (
     FrozenClock,
@@ -39,7 +39,7 @@ from ..support.fakes import (
     StubKnowledgeBase,
 )
 
-RAIZ = Path(__file__).resolve().parents[2] / "src" / "luis_cv"
+RAIZ = Path(__file__).resolve().parents[2] / "src" / "rag_agent"
 PROHIBIDAS = {"fastapi", "starlette", "boto3", "botocore", "uvicorn", "pydantic", "pydantic_settings", "httpx"}
 
 
@@ -118,3 +118,29 @@ def test_un_catalogo_vacio_no_puede_construirse():
     """Un mapa de alias vacío es un fallo de configuración, no un caso válido."""
     with pytest.raises(ValueError):
         StaticModelCatalog({})
+
+
+def test_la_imagen_incluye_los_perfiles():
+    """Guarda de un fallo que ya ocurrió: sin `COPY profiles`, el contenedor
+    arrancaba, devolvía 200 y respondía con un perfil genérico que nadie
+    escribió, sobre un corpus que no era el suyo. Un despliegue que funciona a
+    medias es peor que uno que no arranca."""
+    repo = RAIZ.parents[1]
+    dockerfile = (repo / "Dockerfile").read_text(encoding="utf-8")
+    ignorados = (repo / ".dockerignore").read_text(encoding="utf-8").split()
+
+    assert "COPY profiles" in dockerfile
+    assert "profiles" not in ignorados
+
+
+def test_todo_perfil_declarado_es_cargable():
+    """Terraform crea una Knowledge Base por archivo de `profiles/`. Un YAML
+    inválido rompería el despliegue, no solo el arranque local."""
+    from rag_agent.infrastructure.profiles import load_profiles
+
+    perfiles = load_profiles(RAIZ.parents[1] / "profiles")
+
+    assert perfiles, "el repositorio debe traer al menos un tema de ejemplo"
+    for slug, binding in perfiles.items():
+        assert binding.profile.slug == slug
+        assert binding.profile.subject

@@ -98,7 +98,7 @@ data "aws_iam_policy_document" "task" {
   statement {
     sid       = "RecuperarDeLaKnowledgeBase"
     actions   = ["bedrock:Retrieve"]
-    resources = [aws_bedrockagent_knowledge_base.main.arn]
+    resources = [for kb in aws_bedrockagent_knowledge_base.main : kb.arn]
   }
 
   dynamic "statement" {
@@ -182,19 +182,22 @@ resource "aws_ecs_task_definition" "api" {
     }]
 
     environment = [
-      { name = "LUISCV_ENVIRONMENT", value = var.environment },
-      { name = "LUISCV_LOG_LEVEL", value = "INFO" },
-      { name = "LUISCV_AWS_REGION", value = var.aws_region },
-      { name = "LUISCV_INFERENCE_BACKEND", value = "bedrock" },
-      { name = "LUISCV_RETRIEVAL_BACKEND", value = "bedrock" },
-      { name = "LUISCV_KNOWLEDGE_BASE_ID", value = local.knowledge_base_id },
-      { name = "LUISCV_GUARDRAIL_ID", value = var.guardrail_id },
-      { name = "LUISCV_MODEL_ALIASES", value = jsonencode(var.model_aliases) },
-      { name = "LUISCV_MODEL_SAMPLING", value = jsonencode(var.model_sampling) },
+      { name = "RAG_ENVIRONMENT", value = var.environment },
+      { name = "RAG_LOG_LEVEL", value = "INFO" },
+      { name = "RAG_AWS_REGION", value = var.aws_region },
+      { name = "RAG_INFERENCE_BACKEND", value = "bedrock" },
+      { name = "RAG_RETRIEVAL_BACKEND", value = "bedrock" },
+      # Mapa slug → KB. El servicio sirve todos los temas a la vez y el cliente
+      # elige el suyo con la cabecera `X-Rag-Profile`.
+      { name = "RAG_PROFILE_KNOWLEDGE_BASES", value = jsonencode(local.knowledge_base_ids) },
+      { name = "RAG_DEFAULT_PROFILE", value = var.default_profile },
+      { name = "RAG_GUARDRAIL_ID", value = var.guardrail_id },
+      { name = "RAG_MODEL_ALIASES", value = jsonencode(var.model_aliases) },
+      { name = "RAG_MODEL_SAMPLING", value = jsonencode(var.model_sampling) },
     ]
 
     secrets = [
-      { name = "LUISCV_API_TOKEN", valueFrom = aws_secretsmanager_secret.api_token.arn },
+      { name = "RAG_API_TOKEN", valueFrom = aws_secretsmanager_secret.api_token.arn },
     ]
 
     logConfiguration = {

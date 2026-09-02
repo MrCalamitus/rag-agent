@@ -1,7 +1,9 @@
-"""El archivo de preguntas de oro se valida en cada `make test`.
+"""Los archivos de preguntas de oro se validan en cada `make test`.
 
-Cuando lleguen las 20 preguntas definitivas (decisión C), un error de forma
-debe fallar aquí y no a mitad de la evaluación contra el despliegue.
+Hay uno por tema —`golden.yaml`, `golden-coches.yaml`, …— porque las preguntas
+de un corpus de credenciales no miden nada sobre uno de fichas técnicas. Un
+error de forma debe fallar aquí y no a mitad de la evaluación contra el
+despliegue, que es cara y lenta.
 """
 
 from __future__ import annotations
@@ -12,12 +14,24 @@ import pytest
 
 yaml = pytest.importorskip("yaml")
 
-GOLDEN = Path(__file__).resolve().parents[1] / "golden.yaml"
+PRUEBAS = Path(__file__).resolve().parents[1]
+ARCHIVOS = sorted(PRUEBAS.glob("golden*.y*ml"))
 
 
-@pytest.fixture(scope="module")
-def golden() -> dict:
-    return yaml.safe_load(GOLDEN.read_text(encoding="utf-8"))
+@pytest.fixture(params=ARCHIVOS, ids=lambda ruta: ruta.name)
+def golden(request) -> dict:
+    return yaml.safe_load(request.param.read_text(encoding="utf-8"))
+
+
+def test_hay_al_menos_un_conjunto_de_oro():
+    assert ARCHIVOS, "sin preguntas de oro no hay forma de medir una regresión"
+
+
+def test_cada_conjunto_declara_su_tema():
+    """Sin `perfil`, la evaluación mide el tema activo y no el que se pretendía."""
+    for ruta in ARCHIVOS:
+        datos = yaml.safe_load(ruta.read_text(encoding="utf-8"))
+        assert datos.get("perfil"), f"{ruta.name} no declara contra qué tema evalúa"
 
 
 def test_el_archivo_tiene_version_y_preguntas(golden):

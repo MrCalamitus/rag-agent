@@ -16,7 +16,7 @@ terraform {
   # toque un segundo par de manos, mover a S3 con bloqueo:
   #
   # backend "s3" {
-  #   bucket       = "luis-cv-tfstate-<account_id>"
+  #   bucket       = "rag-agent-tfstate-<account_id>"
   #   key          = "prod/terraform.tfstate"
   #   region       = "us-east-1"
   #   encrypt      = true

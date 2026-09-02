@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from luis_cv.domain.conversation import Conversation, Role, Turn
-from luis_cv.domain.prompts import DECLINE_PHRASE, build_system_prompt, render_context
-from luis_cv.domain.query_planning import condense, plan_queries
-from luis_cv.domain.redaction import StreamingRedactor, contains_identifier, fingerprint, mask_identifiers
-from luis_cv.domain.retrieval import Chunk, RetrievalOutcome
+from rag_agent.domain.conversation import Conversation, Role, Turn
+from rag_agent.domain.prompts import DECLINE_PHRASE, build_system_prompt, render_context
+from rag_agent.domain.query_planning import condense, plan_queries
+from rag_agent.domain.redaction import StreamingRedactor, contains_identifier, fingerprint, mask_identifiers
+from rag_agent.domain.retrieval import Chunk, RetrievalOutcome
 
 CURP = "GOOL850315HDFRRS09"
 RFC = "GOOL850315AB1"
@@ -155,7 +155,7 @@ def test_el_resultado_de_recuperacion_deduplica_documentos():
 def test_se_reconocen_las_formas_de_negacion_de_un_modelo_real(respuesta):
     """Un modelo real casi nunca usa la frase canónica literal, y sus
     negaciones suelen ser mejores: nombran qué falta y ofrecen continuar."""
-    from luis_cv.domain.prompts import is_denial
+    from rag_agent.domain.prompts import is_denial
 
     assert is_denial(respuesta)
 
@@ -171,6 +171,6 @@ def test_se_reconocen_las_formas_de_negacion_de_un_modelo_real(respuesta):
 def test_una_afirmacion_no_se_confunde_con_una_negacion(respuesta):
     """La heurística no puede dar por negada una respuesta que afirma: sería
     dar por bueno justo el fallo que la evaluación busca."""
-    from luis_cv.domain.prompts import is_denial
+    from rag_agent.domain.prompts import is_denial
 
     assert not is_denial(respuesta)

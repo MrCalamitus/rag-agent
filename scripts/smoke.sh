@@ -25,7 +25,7 @@ echo "▸ camino feliz (no streaming)"
 curl -sS -X POST "$BASE_URL/v1/responses" \
   -H "Authorization: Bearer $API_TOKEN" -H 'Content-Type: application/json' \
   -d '{"model":"'"$MODELO"'","input":"¿Qué formación académica tiene?"}' \
-  | tee /tmp/luis-cv-smoke.json | grep -q '"agente:knowledge_search"' \
+  | tee /tmp/rag-agent-smoke.json | grep -q '"agente:knowledge_search"' \
   || fallo "la respuesta no trae el recibo de recuperación"
 
 echo "▸ streaming con marcas de tiempo (B7 y B8)"
@@ -33,10 +33,10 @@ curl -sSN -X POST "$BASE_URL/v1/responses" \
   -H "Authorization: Bearer $API_TOKEN" -H 'Content-Type: application/json' \
   -d '{"model":"'"$MODELO"'","stream":true,"input":"Resume su experiencia en la nube."}' \
   | while IFS= read -r linea; do printf '%s %s\n' "$(date +%s.%N)" "$linea"; done \
-  | tee /tmp/luis-cv-stream.txt | tail -5
+  | tee /tmp/rag-agent-stream.txt | tail -5
 
-primero=$(grep -m1 'output_text.delta' /tmp/luis-cv-stream.txt | cut -d' ' -f1 || true)
-ultimo=$(grep 'output_text.delta' /tmp/luis-cv-stream.txt | tail -1 | cut -d' ' -f1 || true)
+primero=$(grep -m1 'output_text.delta' /tmp/rag-agent-stream.txt | cut -d' ' -f1 || true)
+ultimo=$(grep 'output_text.delta' /tmp/rag-agent-stream.txt | tail -1 | cut -d' ' -f1 || true)
 [[ -n "$primero" && -n "$ultimo" ]] || fallo "no llegaron deltas"
 separacion=$(awk -v a="$primero" -v b="$ultimo" 'BEGIN{printf "%.3f", b-a}')
 echo "   deltas repartidos en ${separacion}s"

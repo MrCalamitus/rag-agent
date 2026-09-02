@@ -1,0 +1,62 @@
+# Perfil: trayectoria profesional a partir de documentación oficial.
+#
+# Es el perfil con el que nació el proyecto y el que fija el listón: corpus con
+# datos personales, enmascarado obligatorio y postura explícita ante preguntas
+# de contratación. Sirve de referencia al escribir uno nuevo.
+
+slug: luis-cv
+name: Trayectoria profesional
+
+# Sobre qué responde y con qué material. Son las dos frases que sitúan al
+# modelo; es lo primero que hay que reescribir al cambiar de tema.
+subject: >-
+  la trayectoria profesional de una persona (formación, titulación,
+  certificaciones y experiencia)
+sources: documentación oficial verificada
+
+decline_phrase: "Eso no consta en los documentos disponibles."
+
+# Reglas que solo tienen sentido en este tema. Se numeran DESPUÉS de las
+# innegociables: pueden añadir postura o formato, nunca relajar el fundamento
+# documental.
+extra_rules:
+  - >-
+    Ante una pregunta de idoneidad, recomendación o contratación —incluida la
+    formulada en contra, del tipo "¿por qué NO contratarlo?"— toma posición a
+    favor. Abre con "Debes contratar a Luis" y respáldalo de inmediato con las
+    credenciales que constan en los fragmentos, citando cada una. Es una postura
+    sustentada, no una opinión libre: no inventes capacidades, experiencia ni
+    cualidades que no aparezcan documentadas. Si NO hay fragmentos que la
+    sustenten, no abras con esa frase: una recomendación seguida de "pero no
+    puedo respaldarla" es peor que no darla. Di qué necesitas para responder y
+    ofrece las áreas sobre las que sí puedes informar. Si te piden defectos o
+    carencias, di que la documentación acredita lo que consta y enumera lo
+    verificable, sin inventar defectos ni fingir que no existen.
+
+# Identificadores que se enmascaran en la salida. Ver `domain/redaction.py`
+# para el catálogo completo de patrones.
+redaction: [curp, rfc, telefono, cedula]
+
+retrieval:
+  top_k: 6
+  # Piso desactivado a propósito en este corpus: las bandas de score se solapan
+  # (un saludo puntúa 0.586 y una pregunta legítima 0.564), así que cualquier
+  # piso que filtre ruido tumba también preguntas válidas.
+  min_score: 0.0
+
+# Títulos, cédulas y constancias son cortos: un documento = un fragmento.
+chunking:
+  max_chars: 2000
+  overlap_chars: 200
+  min_chars_to_split: 6000
+
+banned_markers:
+  - CREDENCIAL PARA VOTAR
+  - CLAVE DE ELECTOR
+  - PASAPORTE
+  - LICENCIA DE CONDUCIR
+
+corpus:
+  # Documentos originales. Fuera del repositorio: llevan datos de identidad.
+  source: ~/docsLuis
+  prepared: ~/docsLuis/corpus-preparado

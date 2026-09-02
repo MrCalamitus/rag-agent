@@ -7,7 +7,7 @@ import json
 
 import pytest
 
-from luis_cv.infrastructure.outbound.local.corpus_knowledge_base import LocalCorpusKnowledgeBase
+from rag_agent.infrastructure.outbound.local.corpus_knowledge_base import LocalCorpusKnowledgeBase
 
 from ..conftest import CORPUS
 

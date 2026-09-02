@@ -6,10 +6,10 @@ import json
 
 import pytest
 
-from luis_cv.domain import events as ev
-from luis_cv.domain.conversation import Role, ToolChoice
-from luis_cv.domain.errors import AgentError, ErrorType
-from luis_cv.domain.items import (
+from rag_agent.domain import events as ev
+from rag_agent.domain.conversation import Role, ToolChoice
+from rag_agent.domain.errors import AgentError, ErrorType
+from rag_agent.domain.items import (
     AgentResponse,
     ItemStatus,
     KnowledgeSearchItem,
@@ -17,10 +17,10 @@ from luis_cv.domain.items import (
     ResponseStatus,
     Usage,
 )
-from luis_cv.domain.retrieval import Chunk, RetrievalOutcome
-from luis_cv.infrastructure.inbound.http.schemas import CreateResponseRequest, unknown_fields
-from luis_cv.infrastructure.inbound.http.security import TokenBucketRateLimiter, authenticate
-from luis_cv.infrastructure.inbound.http.sse import OpenResponsesTranslator, format_sse
+from rag_agent.domain.retrieval import Chunk, RetrievalOutcome
+from rag_agent.infrastructure.inbound.http.schemas import CreateResponseRequest, unknown_fields
+from rag_agent.infrastructure.inbound.http.security import TokenBucketRateLimiter, authenticate
+from rag_agent.infrastructure.inbound.http.sse import OpenResponsesTranslator, format_sse
 
 
 # -- esquema ------------------------------------------------------------

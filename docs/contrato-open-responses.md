@@ -46,8 +46,9 @@ soportar todo y falla en silencio es peor que uno con superficie honesta.
 
 ```
 POST /v1/responses          # crear respuesta
+GET  /v1/profiles           # temas servidos por este despliegue (extensión)
 GET  /healthz               # liveness — sin auth, para el health check del ALB
-GET  /readyz                # readiness — verifica Bedrock y KB alcanzables
+GET  /readyz                # readiness — verifica Bedrock y las KB alcanzables
 ```
 
 ### Cabeceras de petición
@@ -56,9 +57,36 @@ GET  /readyz                # readiness — verifica Bedrock y KB alcanzables
 |---|---|---|
 | `Authorization` | Sí | `Bearer <token>` |
 | `Content-Type` | Sí | `application/json` |
+| `X-Rag-Profile` | No | Tema sobre el que responder (extensión) |
 
 El cuerpo MUST ir codificado como `application/json`. Ausencia o valor
 distinto → `invalid_request` (400).
+
+**`X-Rag-Profile` (extensión).** Un mismo despliegue sirve varios temas —cada
+uno con su corpus, sus reglas y su Knowledge Base— y esta cabecera elige cuál.
+Ausente → el tema por defecto del despliegue. Desconocido → `invalid_request`
+(400) con `code: profile_not_found` y la lista de temas válidos en el mensaje.
+
+Va en cabecera y no en el cuerpo a propósito: el cuerpo es el de Open Responses
+y §2 obliga a tolerar campos desconocidos ignorándolos, de modo que un `profile`
+mal escrito en el JSON se ignoraría en silencio y el cliente recibiría respuestas
+del tema equivocado sin ningún aviso. Como cabecera, un cliente estándar que no
+sabe que esto existe sigue funcionando y recibe el tema por defecto.
+
+**`GET /v1/profiles`.** Devuelve los temas disponibles y cuál es el
+predeterminado. Requiere autenticación: la lista de temas describe qué
+documentación hay indexada, y eso ya es información.
+
+```json
+{
+  "default": "coches",
+  "data": [
+    { "id": "coches", "name": "Marcas y modelos de coches",
+      "subject": "los vehículos, versiones y especificaciones…",
+      "masks_identifiers": false }
+  ]
+}
+```
 
 ### Cabeceras de respuesta
 

@@ -3,7 +3,7 @@ requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "luis-cv"
+name = "rag-agent"
 version = "0.1.0"
 description = "Agente RAG auditable compatible con Open Responses 2026-04-24"
 requires-python = ">=3.11"
@@ -13,10 +13,15 @@ dependencies = [
     "pydantic>=2.9",
     "pydantic-settings>=2.5",
     "boto3>=1.35",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.3", "pytest-asyncio>=0.24", "httpx>=0.27", "anyio>=4.4", "pyyaml>=6.0"]
+
+[project.scripts]
+# Menú interactivo. Tras `pip install -e .` basta con escribir `rag`.
+rag = "rag_agent.infrastructure.inbound.cli.menu:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -34,4 +39,4 @@ markers = [
     "slow: tarda más de un segundo (concurrencia, streaming real)",
     "deployed: corre contra el despliegue; exige BASE_URL",
 ]
-filterwarnings = ["error::DeprecationWarning:luis_cv.*"]
+filterwarnings = ["error::DeprecationWarning:rag_agent.*"]

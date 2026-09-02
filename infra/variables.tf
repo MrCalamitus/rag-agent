@@ -23,7 +23,7 @@ variable "aws_region" {
 variable "project" {
   description = "Prefijo y tag de toda la infraestructura."
   type        = string
-  default     = "luis-cv"
+  default     = "rag-agent"
 }
 
 variable "environment" {
@@ -125,6 +125,15 @@ variable "embedding_dimension" {
   description = "Dimensión del índice vectorial. Debe coincidir con la salida del modelo de embeddings (Titan v2: 1024)."
   type        = number
   default     = 1024
+}
+
+variable "default_profile" {
+  description = <<-EOT
+    Tema que se usa cuando la petición no manda la cabecera `X-Rag-Profile`.
+    Vacío = el primero por orden alfabético de archivo en profiles/.
+  EOT
+  type        = string
+  default     = ""
 }
 
 variable "guardrail_id" {

@@ -15,11 +15,12 @@ import time
 import httpx
 import pytest
 
-from luis_cv.infrastructure.container import build_container
-from luis_cv.infrastructure.inbound.http.app import create_app
-from luis_cv.infrastructure.outbound.local.corpus_knowledge_base import LocalCorpusKnowledgeBase
-from luis_cv.infrastructure.outbound.local.grounded_stub_model import GroundedStubLanguageModel
-from luis_cv.infrastructure.outbound.telemetry.structured import StructuredTelemetry
+from rag_agent.infrastructure.container import build_container
+from rag_agent.infrastructure.inbound.http.app import create_app
+from rag_agent.infrastructure.outbound.knowledge_bases import SingleKnowledgeBase
+from rag_agent.infrastructure.outbound.local.corpus_knowledge_base import LocalCorpusKnowledgeBase
+from rag_agent.infrastructure.outbound.local.grounded_stub_model import GroundedStubLanguageModel
+from rag_agent.infrastructure.outbound.telemetry.structured import StructuredTelemetry
 
 from ..conftest import CORPUS, build_client
 from ..support.fakes import FrozenClock, SequentialIds, StubKnowledgeBase
@@ -92,7 +93,7 @@ def test_d4b_el_request_id_del_cliente_se_respeta(client, auth):
 
 def test_d5_ningun_log_contiene_pii_ni_el_texto_del_turno(settings, caplog):
     """Se verifica leyendo los logs reales, no asumiendo (plan E6)."""
-    logger = logging.getLogger("luis_cv")
+    logger = logging.getLogger("rag_agent")
     contenedor = build_container(
         settings,
         knowledge_base=LocalCorpusKnowledgeBase(CORPUS),
@@ -103,7 +104,7 @@ def test_d5_ningun_log_contiene_pii_ni_el_texto_del_turno(settings, caplog):
     )
     cliente = build_client(contenedor)
 
-    with caplog.at_level(logging.DEBUG, logger="luis_cv"):
+    with caplog.at_level(logging.DEBUG, logger="rag_agent"):
         respuesta = cliente.post(
             RUTA,
             json=PREGUNTA,
@@ -197,7 +198,7 @@ async def test_la_sonda_de_readiness_esta_acotada(settings, telemetry):
     import asyncio
     import time
 
-    from luis_cv.application.check_readiness import CheckReadiness
+    from rag_agent.application.check_readiness import CheckReadiness
 
     class KbQueNuncaResponde:
         async def retrieve(self, queries, *, top_k=6):  # pragma: no cover
@@ -216,7 +217,7 @@ async def test_la_sonda_de_readiness_esta_acotada(settings, telemetry):
             ids=SequentialIds(),
             telemetry=telemetry,
         ).catalog,
-        knowledge_base=KbQueNuncaResponde(),
+        knowledge_bases=SingleKnowledgeBase(KbQueNuncaResponde()),
         language_model=GroundedStubLanguageModel(),
         timeout_s=0.2,
     )
@@ -232,7 +233,7 @@ async def test_la_sonda_de_readiness_esta_acotada(settings, telemetry):
 
 
 async def test_una_dependencia_que_revienta_no_propaga_la_excepcion():
-    from luis_cv.application.check_readiness import CheckReadiness
+    from rag_agent.application.check_readiness import CheckReadiness
 
     class KbRota:
         async def retrieve(self, queries, *, top_k=6):  # pragma: no cover
@@ -243,7 +244,7 @@ async def test_una_dependencia_que_revienta_no_propaga_la_excepcion():
 
     caso = CheckReadiness(
         catalog=StubKnowledgeBase(),  # cualquier objeto con is_available sirve
-        knowledge_base=KbRota(),
+        knowledge_bases=SingleKnowledgeBase(KbRota()),
         language_model=GroundedStubLanguageModel(),
     )
 

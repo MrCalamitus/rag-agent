@@ -4,15 +4,19 @@ from __future__ import annotations
 
 import pytest
 
-from luis_cv.application.commands import CreateResponseCommand
-from luis_cv.application.create_response import CreateResponse
-from luis_cv.application.ports import ModelDescriptor
-from luis_cv.domain import events as ev
-from luis_cv.domain.conversation import Conversation, GenerationSettings, Role, ToolChoice, Turn
-from luis_cv.domain.errors import AgentError, ErrorType
-from luis_cv.domain.items import ItemStatus, KnowledgeSearchItem, MessageItem
-from luis_cv.domain.retrieval import Chunk
-from luis_cv.infrastructure.outbound.model_catalog import StaticModelCatalog
+from rag_agent.application.commands import CreateResponseCommand
+from rag_agent.application.create_response import CreateResponse
+from rag_agent.application.ports import ModelDescriptor
+from rag_agent.domain import events as ev
+from rag_agent.domain.conversation import Conversation, GenerationSettings, Role, ToolChoice, Turn
+from rag_agent.domain.errors import AgentError, ErrorType
+from rag_agent.domain.items import ItemStatus, KnowledgeSearchItem, MessageItem
+from rag_agent.domain.profile import Profile
+from rag_agent.domain.redaction import RedactionPolicy
+from rag_agent.domain.retrieval import Chunk
+from rag_agent.infrastructure.outbound.knowledge_bases import SingleKnowledgeBase
+from rag_agent.infrastructure.outbound.model_catalog import StaticModelCatalog
+from rag_agent.infrastructure.profiles import ProfileBinding, StaticProfileRegistry
 
 from ..support.fakes import (
     FrozenClock,
@@ -24,13 +28,26 @@ from ..support.fakes import (
 
 CHUNKS = (Chunk("titulo-2019.md", "Título de Ingeniería expedido en 2019.", 0.91, {"anio": 2019}),)
 
+# Perfil de prueba con enmascarado activo: estos casos cubren la redacción de
+# identificadores, que es una política del perfil y no un comportamiento global.
+PERFIL = Profile(
+    slug="prueba",
+    name="Perfil de prueba",
+    subject="la trayectoria profesional de una persona",
+    redaction=RedactionPolicy.mexicana(),
+)
+
 
 def construir(**overrides) -> CreateResponse:
+    """`knowledge_base=` se acepta como atajo: una base para todos los perfiles."""
+    kb = overrides.pop("knowledge_base", None) or StubKnowledgeBase(chunks=CHUNKS)
+    perfil = overrides.pop("profile", PERFIL)
     base = {
         "catalog": StaticModelCatalog(
             {"agente-rag-sonnet": ModelDescriptor("agente-rag-sonnet", "anthropic.claude-sonnet-5")}
         ),
-        "knowledge_base": StubKnowledgeBase(chunks=CHUNKS),
+        "profiles": StaticProfileRegistry({perfil.slug: ProfileBinding(profile=perfil)}),
+        "knowledge_bases": SingleKnowledgeBase(kb),
         "language_model": ScriptedLanguageModel(script=["Título ", "de ", "Ingeniería."]),
         "clock": FrozenClock(),
         "ids": SequentialIds(),
