@@ -186,6 +186,13 @@ lujo: una fila de equipamiento leída sin su columna afirma de **todas** las
 versiones lo que solo vale para una. `texto` (tesseract) es gratis y offline
 pero aplana, y lo avisa.
 
+La interpretación es **opt-in por forma, no por tema**. Una tabla se lee como
+ficha comparativa solo si demuestra serlo; una tabla de datos —un balance, un
+histórico— se vuelca sin interpretar, con cada fila llevando sus encabezados
+dentro para que el troceado no deje cifras huérfanas de su columna. Es lo que
+permite apuntar el pipeline a un corpus que nadie ha revisado sin que invente
+relaciones entre datos.
+
 Antes de transcribir nada, `make corpus` enseña cuántas páginas va a procesar y
 cuánto cuesta; el resultado se cachea por contenido del archivo, así que
 reajustar el troceado no vuelve a pagarlo. Una transcripción demasiado pobre para

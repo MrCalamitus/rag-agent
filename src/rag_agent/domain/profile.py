@@ -49,6 +49,55 @@ class ChunkPolicy:
 
 
 @dataclass(frozen=True)
+class CleanupPolicy:
+    """Qué se descarta del texto extraído antes de trocearlo.
+
+    Vive en el dominio porque decide qué deja de ser evidencia. Y es
+    deliberadamente tímida: las dos heurísticas que gobierna —quitar folios y
+    quitar encabezados corridos— son inofensivas sobre prosa y destructivas
+    sobre tablas numéricas, donde una línea que solo contiene «125» es un dato y
+    no un número de página.
+
+    La versión anterior descartaba cualquier número suelto estuviera donde
+    estuviera, y colapsaba líneas idénticas consecutivas. Sobre un estado de
+    resultados extraído con etiqueta y valor en líneas separadas eso borraba
+    **todas las cifras** y dejaba el documento con todas sus etiquetas: un
+    corpus que parece correcto y no puede responder nada.
+    """
+
+    # Un número suelto solo es un folio si está en el borde de su página. En
+    # cualquier otra posición es contenido. `0` desactiva la regla.
+    #
+    # El valor es 1 —la primera o la última línea, nada más— porque con 2 ya se
+    # come datos: en una tabla que acaba en «… Impuestos / 12 / - 4 -», el 12 cae
+    # dentro del borde. Un folio precedido de un pie de página se queda sin
+    # detectar, pero ese pie lo caza la regla de líneas corridas, y dejar un
+    # número de página suelto es infinitamente menos grave que borrar una cifra.
+    folio_lineas_borde: int = 1
+    # Un encabezado o pie corrido es una línea que se repite a lo largo del
+    # documento, no una que aparece dos veces seguidas.
+    repeticion_fraccion: float = 0.6
+    # …y además se repite **en el borde** de la página, que es donde viven los
+    # encabezados y los pies. Una línea que reaparece en mitad de páginas
+    # distintas es contenido que se repite, no decoración.
+    repeticion_lineas_borde: int = 3
+    # Por debajo de estas páginas no se deduplica nada: en un documento de dos
+    # páginas, «repetido en la mayoría» y «aparece dos veces» son lo mismo, y
+    # borrar contenido legítimo es peor que dejar un pie duplicado.
+    repeticion_min_paginas: int = 3
+
+    def __post_init__(self) -> None:
+        if self.folio_lineas_borde < 0:
+            raise ValueError("folio_lineas_borde no puede ser negativo")
+        if self.repeticion_lineas_borde < 1:
+            raise ValueError("repeticion_lineas_borde debe ser al menos 1")
+        if not 0.0 < self.repeticion_fraccion <= 1.0:
+            raise ValueError("repeticion_fraccion debe estar en (0, 1]")
+        if self.repeticion_min_paginas < 2:
+            raise ValueError("repeticion_min_paginas debe ser al menos 2")
+
+
+@dataclass(frozen=True)
 class OcrPolicy:
     """Qué hacer con un PDF del que no se puede extraer texto.
 
@@ -88,6 +137,11 @@ class OcrPolicy:
     # fichas reales: 7.500-10.000 caracteres por página cuando hay contenido,
     # 60 cuando no. El umbral está en mitad de dos órdenes de magnitud.
     min_chars_por_pagina: int = 200
+    # Cómo llamar a las columnas de una tabla comparativa al redactarla: en una
+    # ficha de coches son «versiones», en una tabla trimestral «periodos». El
+    # módulo de extracción no puede saberlo, y hasta ahora decía «versiones»
+    # siempre, que en una tabla financiera es sencillamente falso.
+    columnas: str = "columnas"
 
     MOTORES = ("ninguno", "tablas", "texto")
 
@@ -146,6 +200,7 @@ class Profile:
     redaction: RedactionPolicy = field(default_factory=RedactionPolicy.ninguna)
     retrieval: RetrievalPolicy = field(default_factory=RetrievalPolicy)
     chunking: ChunkPolicy = field(default_factory=ChunkPolicy)
+    cleanup: CleanupPolicy = field(default_factory=CleanupPolicy)
     ocr: OcrPolicy = field(default_factory=OcrPolicy)
     # Segmentos de la ruta del corpus que se convierten en metadatos. Con
     # `corpus/coches/toyota/hilux.pdf` y `("tema", "marca")` el fragmento sale

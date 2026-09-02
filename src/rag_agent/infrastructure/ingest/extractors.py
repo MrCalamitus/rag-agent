@@ -23,14 +23,24 @@ import json
 import re
 import sys
 import xml.etree.ElementTree as ET
+from math import ceil
 from pathlib import Path
+
+from ...domain.profile import CleanupPolicy
 
 from .documents import Documento, VetadoError, anio_en, clasificar, marcador_vetado, slug
 
 # Líneas de sello, huella o base64: ruido que degrada la recuperación.
 _RUIDO = re.compile(r"^[A-Za-z0-9+/=]{60,}$")
-# Número de página suelto: en un folleto de 40 páginas son 40 líneas de basura.
+# Folio: un número suelto, con o sin guiones de adorno. **Solo se descarta si
+# está en el borde de su página.** Aplicarlo en cualquier posición borraba los
+# valores de toda tabla cuya capa de texto pone etiqueta y cifra en líneas
+# separadas, que es como muchos PDF disponen sus tablas.
 _NUMERO_DE_PAGINA = re.compile(r"^\s*[-–—]?\s*\d{1,3}\s*[-–—]?\s*$")
+# «Página 4 de 12», «Pág. 4/12»: inequívocamente un folio, en cualquier posición.
+_FOLIO_EXPLICITO = re.compile(
+    r"^\s*(p[áa]g(?:ina)?\.?)\s*\d+\s*(?:(?:de|/|of)\s*\d+)?\s*$", re.IGNORECASE
+)
 _MESES = "enero febrero marzo abril mayo junio julio agosto septiembre octubre noviembre diciembre".split()
 
 # Por debajo de esto el PDF no tiene capa de texto útil: es un escaneo y
@@ -38,19 +48,100 @@ _MESES = "enero febrero marzo abril mayo junio julio agosto septiembre octubre n
 MINIMO_TEXTO = 200
 
 
-def limpiar(paginas: list[str]) -> str:
-    lineas = [l.rstrip() for pagina in paginas for l in pagina.splitlines()]
-    utiles = [
-        l for l in lineas
-        if l.strip() and not _RUIDO.match(l.strip()) and not _NUMERO_DE_PAGINA.match(l)
-    ]
-    # Los folletos repiten el pie de página en cada plana. Colapsar líneas
-    # idénticas consecutivas quita la repetición sin tocar contenido real.
-    colapsadas: list[str] = []
-    for linea in utiles:
-        if not colapsadas or colapsadas[-1] != linea:
-            colapsadas.append(linea)
-    return "\n".join(colapsadas).strip()
+def limpiar(paginas: list[str], policy: CleanupPolicy | None = None) -> str:
+    """Quita folios y encabezados corridos sin tocar el contenido.
+
+    Se trabaja **por páginas** y no sobre el texto aplanado, porque las dos
+    señales que distinguen la basura del dato son posicionales: un folio está en
+    el borde de su página, y un pie corrido se repite a lo largo del documento.
+    Sin esa información las dos reglas degeneran en «borra números» y «borra
+    repeticiones», que sobre una tabla numérica es borrar la tabla.
+    """
+    politica = policy or CleanupPolicy()
+    por_pagina: list[list[str]] = []
+    for pagina in paginas:
+        lineas = [l.rstrip() for l in pagina.splitlines()]
+        por_pagina.append([l for l in lineas if l.strip() and not _RUIDO.match(l.strip())])
+
+    corridas = _lineas_corridas(por_pagina, politica)
+    folios = _folios_posicionales(por_pagina, politica)
+    # De una línea corrida se conserva la primera aparición y se quitan las
+    # demás. Suele ser el título o el modelo —«MAZDA2 SEDÁN 2026»— y borrarlo de
+    # todas partes deja los fragmentos del medio del documento sin decir de qué
+    # hablan. Una vez basta; cuatrocientas treinta y nueve, no.
+    vistas: set[str] = set()
+    salida: list[str] = []
+    for pagina, lineas in enumerate(por_pagina):
+        for indice, linea in enumerate(lineas):
+            if (pagina, indice) in folios or _FOLIO_EXPLICITO.match(linea):
+                continue
+            if linea in corridas:
+                if linea in vistas:
+                    continue
+                vistas.add(linea)
+            salida.append(linea)
+    return "\n".join(salida).strip()
+
+
+def _folios_posicionales(por_pagina: list[list[str]], policy: CleanupPolicy) -> set[tuple[int, int]]:
+    """Números sueltos en el borde que además **crecen** de página en página.
+
+    La posición sola no basta: un balance puede acabar una página en «0», y
+    borrarlo sería borrar un dato. Un folio de verdad forma una serie creciente a
+    lo largo del documento, y comprobarlo cuesta nada. Con una sola página no hay
+    serie que comprobar, así que la regla no se aplica —solo queda el folio
+    escrito con todas las letras, que es inequívoco.
+    """
+    borde = policy.folio_lineas_borde
+    # Se reutiliza el umbral de páginas de la deduplicación: expresa la misma
+    # idea —por debajo de esas páginas ninguna señal estadística o posicional es
+    # de fiar— y evita un segundo botón que ajustar.
+    if borde <= 0 or len(por_pagina) < policy.repeticion_min_paginas:
+        return set()
+
+    folios: set[tuple[int, int]] = set()
+    for al_final in (False, True):
+        candidatos: list[tuple[int, int, int]] = []  # (página, línea, valor)
+        for pagina, lineas in enumerate(por_pagina):
+            if len(lineas) <= borde:
+                continue
+            indice = len(lineas) - 1 if al_final else 0
+            texto = lineas[indice]
+            if _NUMERO_DE_PAGINA.match(texto):
+                candidatos.append((pagina, indice, int(re.sub(r"[^\d]", "", texto) or 0)))
+        valores = [v for _, _, v in candidatos]
+        if len(candidatos) >= policy.repeticion_min_paginas and all(
+            a < b for a, b in zip(valores, valores[1:])
+        ):
+            folios.update((p, i) for p, i, _ in candidatos)
+    return folios
+
+
+def _lineas_corridas(por_pagina: list[list[str]], policy: CleanupPolicy) -> set[str]:
+    """Encabezados y pies que se repiten a lo largo del documento.
+
+    Tres condiciones, y las tres hacen falta. La línea tiene que repetirse en
+    una fracción alta de las páginas —no estar dos veces seguidas—, aparecer en
+    el **borde** de ellas, que es donde viven encabezados y pies, y no ser un
+    número suelto: un `0` al final de cada página de un balance es un dato, y de
+    los folios ya se encarga la regla posicional con su comprobación de serie
+    creciente.
+    """
+    if len(por_pagina) < policy.repeticion_min_paginas:
+        return set()
+    borde = policy.repeticion_lineas_borde
+    conteo: dict[str, int] = {}
+    for lineas in por_pagina:
+        en_borde = {
+            linea
+            for indice, linea in enumerate(lineas)
+            if (indice < borde or indice >= len(lineas) - borde)
+            and not _NUMERO_DE_PAGINA.match(linea)
+        }
+        for linea in en_borde:
+            conteo[linea] = conteo.get(linea, 0) + 1
+    minimo = max(2, ceil(policy.repeticion_fraccion * len(por_pagina)))
+    return {linea for linea, veces in conteo.items() if veces >= minimo}
 
 
 def pdf(
@@ -59,6 +150,7 @@ def pdf(
     banned: tuple[str, ...] = (),
     ocr=None,
     min_chars: int = MINIMO_TEXTO,
+    cleanup: CleanupPolicy | None = None,
     **_,
 ) -> Documento | None:
     """Texto del PDF: capa nativa, descifrando si hace falta, y OCR como respaldo.
@@ -82,7 +174,7 @@ def pdf(
         lector.decrypt("")
 
     paginas = [p.extract_text() or "" for p in lector.pages]
-    texto = limpiar(paginas)
+    texto = limpiar(paginas, cleanup)
     origen = "capa de texto"
     confianza = None
 

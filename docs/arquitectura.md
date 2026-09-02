@@ -213,6 +213,16 @@ Cada fragmento lleva de dónde salió su texto (`origen_texto`, `ocr_confianza`,
 `cifrado_original`): una cita que procede de una transcripción automática no
 vale lo mismo que una del original.
 
+**Conservador por defecto.** Sobre un corpus que nadie ha mirado, la ingesta solo
+interpreta lo que puede demostrar. Una tabla se lee como ficha comparativa —con
+frases del tipo «solo en X»— únicamente si tiene esa forma: columna de etiquetas,
+varios encabezados y una fracción alta de celdas vacías o marcadas. Cualquier
+otra se vuelca sin interpretar, con cada fila llevando sus encabezados dentro. Y
+las viñetas se calibran por tabla exigiendo separación bimodal, en vez de
+confiar en un umbral afinado sobre otro corpus. La limpieza de texto sigue la
+misma regla: un número suelto solo es un folio si está en el borde de su página y
+forma serie creciente, porque en una tabla numérica es un dato.
+
 ### El menú como adaptador de entrada
 
 `make menu` es un adaptador de entrada igual que el HTTP, solo que el actor es
@@ -287,6 +297,7 @@ las pruebas de contrato dejarían de decir algo sobre el otro.
 | E7 — Evaluación | ◐ 14 preguntas contra el despliegue con RAG real (Sonnet 14/14); faltan 6 para las 20 del plan |
 | E8 — RAG general reutilizable | ◐ temas por YAML, ingesta genérica de PDF con troceado, menú interactivo y N Knowledge Bases; falta desplegar la topología multi-tema |
 | E9 — Rescate de PDFs ilegibles | ✅ descifrado, transcripción con estructura de tabla, caché y guardas de densidad; 30 documentos ilegibles → 22 rescatados y 8 rechazados con motivo |
+| E10 — Extracción segura sobre corpus desconocidos | ◐ limpieza posicional, forma de tabla demostrada y viñetas auto-calibradas; falta `LAYOUT` para prosa a dos columnas y `FORMS` |
 
 **Inferencia real conectada.** El servicio ya corre contra Bedrock sin
 infraestructura: `RAG_INFERENCE_BACKEND=bedrock` con la recuperación local.

@@ -50,10 +50,10 @@ from . import PaginaExtraida, ResultadoOcr
 REINTENTOS = {"max_attempts": 8, "mode": "adaptive"}
 LECTURA_S = 60
 
-# Fracción de píxeles oscuros dentro de una celda a partir de la cual se
-# considera que hay una marca. Medido sobre fichas reales: las celdas marcadas
-# dan 0.005-0.008 y las vacías exactamente 0.000, así que el umbral está en
-# mitad de un hueco muy ancho y no en el filo de nada.
+# Fracción de píxeles oscuros dentro de una celda a partir de la cual *puede*
+# haber una marca. Es condición necesaria, no suficiente: el umbral real se
+# calibra por tabla (`_umbral_de_marca`), porque una banda fija afinada sobre un
+# corpus lee como marca cualquier icono o sombreado de otro.
 TINTA_MARCA_MIN = 0.0015
 # Por encima de esto no es una viñeta sino un fondo de color o una imagen; una
 # celda así no afirma nada y no debe leerse como marcada.
@@ -66,6 +66,46 @@ MARGEN_CELDA = 0.18
 # valores distintos. El umbral está en mitad de un hueco de dos órdenes de
 # magnitud, no en el filo de nada.
 HUECO_MISMO_VALOR = 0.01
+
+# Hueco mínimo entre el grupo de celdas vacías y el de celdas marcadas para
+# fiarse de la distinción. Sobre fichas reales el hueco medido es de 0.005; si
+# en un documento no aparece esa separación limpia, no hay forma de saber qué es
+# una marca y qué es un adorno, y no se emite ninguna.
+SEPARACION_BIMODAL = 0.001
+
+# Una viñeta es una mancha pequeña y centrada. Un sombreado de fondo o un icono
+# ancho no lo son, y confundirlos afirma una característica que el documento no
+# afirma — el error en la dirección peligrosa.
+MANCHA_ANCHO_MAX = 0.55
+MANCHA_ALTO_MAX = 0.75
+MANCHA_DESVIO_MAX = 0.30
+
+# Forma de tabla: fracción mínima de filas con etiqueta en la primera columna, y
+# de celdas de valor vacías o marcadas, para reconocer una matriz comparativa.
+# Una tabla de datos —un balance, un histórico— tiene casi todas las celdas
+# llenas y no pasa estos filtros, que es justo lo que se busca.
+MATRIZ_ETIQUETAS_MIN = 0.7
+MATRIZ_VACIAS_MIN = 0.5
+
+# Textract marca como TABLE cualquier maquetación en rejilla, incluida una plana
+# de folleto con tres bloques de texto en fila. Tomar la primera fila de eso como
+# encabezados empareja cosas que no van juntas —«1030 km de autonomía: 3 filas de
+# asientos»— y ese emparejamiento es una afirmación falsa, no solo un formato
+# feo. Un encabezado de verdad es una etiqueta corta.
+CABECERA_LARGO_MAX = 30
+CABECERA_FILAS_MIN = 3
+
+
+@dataclass(frozen=True)
+class Mancha:
+    """Lo que hay dibujado en una celda sin texto."""
+
+    fraccion: float = 0.0
+    compacta: bool = False
+
+    @property
+    def posible_marca(self) -> bool:
+        return self.compacta and TINTA_MARCA_MIN < self.fraccion < TINTA_MARCA_MAX
 
 
 @dataclass(frozen=True)
@@ -85,18 +125,34 @@ class Celda:
     rejilla_der: float
     texto_izq: float = 0.0
     texto_der: float = 0.0
-    tinta: float = 0.0
+    mancha: Mancha = Mancha()
 
     @property
     def centro_rejilla(self) -> float:
         return (self.rejilla_izq + self.rejilla_der) / 2
 
+    def marcada(self, umbral: float | None) -> bool:
+        return (
+            umbral is not None
+            and not self.texto
+            and self.mancha.compacta
+            and self.mancha.fraccion >= umbral
+        )
+
 
 class TextractOcr:
     nombre = "tablas"
 
-    def __init__(self, *, dpi: int = 200, region: str | None = None, profile: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        dpi: int = 200,
+        region: str | None = None,
+        profile: str | None = None,
+        columnas: str = "columnas",
+    ) -> None:
         self._dpi = dpi
+        self._columnas = columnas
         self._region = region
         self._profile = profile
         self._cliente: Any | None = None
@@ -130,7 +186,7 @@ class TextractOcr:
             except Exception as exc:  # noqa: BLE001 - una página mala no tumba el documento
                 resultado.avisos.append(f"página {numero}: {type(exc).__name__}: {exc}")
                 continue
-            resultado.paginas.append(_pagina(respuesta, imagen, numero))
+            resultado.paginas.append(_pagina(respuesta, imagen, numero, self._columnas))
         return resultado
 
     # -- interno --------------------------------------------------------
@@ -156,7 +212,9 @@ class TextractOcr:
 # --- traducción de la respuesta a texto ---------------------------------------
 
 
-def _pagina(respuesta: dict, imagen: bytes, numero: int) -> PaginaExtraida:
+def _pagina(
+    respuesta: dict, imagen: bytes, numero: int, columnas: str = "columnas"
+) -> PaginaExtraida:
     bloques = {b["Id"]: b for b in respuesta.get("Blocks", [])}
     tinta = _medidor_de_tinta(imagen)
 
@@ -175,7 +233,7 @@ def _pagina(respuesta: dict, imagen: bytes, numero: int) -> PaginaExtraida:
         if bloque["BlockType"] == "LINE" and not (set(_ids_hijos(bloque)) & ids_en_tabla):
             piezas.append(bloque.get("Text", ""))
     for tabla in tablas:
-        piezas.append(_render_tabla(tabla, bloques, tinta))
+        piezas.append(_render_tabla(tabla, bloques, tinta, columnas))
 
     confianzas = [
         b["Confidence"] for b in respuesta["Blocks"]
@@ -220,18 +278,23 @@ def _contenido(celda: dict, bloques: dict) -> tuple[str, float, float]:
 
 
 def _medidor_de_tinta(imagen: bytes):
-    """Devuelve una función recuadro → fracción de píxeles oscuros."""
+    """Devuelve una función recuadro → `Mancha` (cuánta tinta y con qué forma).
+
+    La fracción sola no distingue una viñeta de un sombreado ni de un icono. Se
+    mide también el recuadro que ocupan los píxeles oscuros: una viñeta es una
+    mancha pequeña y centrada, y cualquier otra cosa no debe leerse como marca.
+    """
     try:
         import io
 
         from PIL import Image
     except ImportError:  # pragma: no cover
-        return lambda _: 0.0
+        return lambda _: Mancha()
 
     gris = Image.open(io.BytesIO(imagen)).convert("L")
     ancho, alto = gris.size
 
-    def medir(caja: dict) -> float:
+    def medir(caja: dict) -> Mancha:
         x0 = caja["Left"] * ancho
         y0 = caja["Top"] * alto
         dx = caja["Width"] * ancho
@@ -240,17 +303,96 @@ def _medidor_de_tinta(imagen: bytes):
         x0, dx = x0 + dx * MARGEN_CELDA, dx * (1 - 2 * MARGEN_CELDA)
         y0, dy = y0 + dy * MARGEN_CELDA, dy * (1 - 2 * MARGEN_CELDA)
         if dx < 3 or dy < 3:
-            return 0.0
+            return Mancha()
         recorte = gris.crop((int(x0), int(y0), int(x0 + dx), int(y0 + dy)))
+        w, h = recorte.size
         pixeles = recorte.tobytes()
-        if not pixeles:
-            return 0.0
-        return sum(1 for p in pixeles if p < 128) / len(pixeles)
+        if not pixeles or w == 0:
+            return Mancha()
+
+        oscuros = 0
+        min_x, max_x, min_y, max_y = w, -1, h, -1
+        for indice, valor in enumerate(pixeles):
+            if valor >= 128:
+                continue
+            oscuros += 1
+            x, y = indice % w, indice // w
+            min_x, max_x = min(min_x, x), max(max_x, x)
+            min_y, max_y = min(min_y, y), max(max_y, y)
+        if not oscuros:
+            return Mancha()
+
+        ancho_rel = (max_x - min_x + 1) / w
+        alto_rel = (max_y - min_y + 1) / h
+        desvio_x = abs((min_x + max_x) / 2 / w - 0.5)
+        desvio_y = abs((min_y + max_y) / 2 / h - 0.5)
+        compacta = (
+            ancho_rel <= MANCHA_ANCHO_MAX
+            and alto_rel <= MANCHA_ALTO_MAX
+            and desvio_x <= MANCHA_DESVIO_MAX
+            and desvio_y <= MANCHA_DESVIO_MAX
+        )
+        return Mancha(fraccion=oscuros / len(pixeles), compacta=compacta)
 
     return medir
 
 
-def _render_tabla(tabla: dict, bloques: dict, tinta) -> str:
+def _umbral_de_marca(manchas: list[Mancha]) -> float | None:
+    """Umbral calibrado sobre esta tabla, o `None` si no se puede distinguir.
+
+    Se busca la separación bimodal: un grupo de celdas casi sin tinta y otro con
+    una mancha clara, con un hueco ancho entre ambos. Si el documento no la
+    presenta —todas las celdas sombreadas, o ninguna marcada— no hay forma de
+    saber qué es una viñeta, y entonces no se emite ninguna. Antes se daba por
+    hecha una banda fija afinada sobre un único corpus.
+    """
+    candidatas = sorted(m.fraccion for m in manchas if m.fraccion <= TINTA_MARCA_MAX)
+    if len(candidatas) < 2:
+        return None
+    hueco, corte = max(
+        (b - a, (a + b) / 2) for a, b in zip(candidatas, candidatas[1:])
+    )
+    if hueco < SEPARACION_BIMODAL:
+        return None
+    bajas = [f for f in candidatas if f < corte]
+    altas = [f for f in candidatas if f >= corte]
+    if not bajas or not altas:
+        return None
+    # El grupo bajo tiene que ser realmente «vacío» y el alto realmente «marcado».
+    if max(bajas) > TINTA_MARCA_MIN or min(altas) < TINTA_MARCA_MIN:
+        return None
+    return corte
+
+
+def _es_matriz_comparativa(
+    por_fila: dict, cabeceras: dict[int, str], umbral: float | None
+) -> bool:
+    """¿Es esta tabla una ficha comparativa, con filas de característica y
+    columnas de versión?
+
+    Solo con esa forma confirmada tiene sentido redactar «solo en X» o «vale
+    para todas»: son afirmaciones sobre el significado de la rejilla. Aplicarlas
+    a un balance o a un histórico de rendimientos inventaría un sentido que la
+    tabla no tiene, y el error saldría en forma de frase perfectamente redactada.
+    """
+    if len(cabeceras) < 2:
+        return False
+    filas = sorted(por_fila)[1:]
+    if not filas:
+        return False
+
+    con_etiqueta = sum(1 for f in filas if por_fila[f].get(1) and por_fila[f][1].texto)
+    if con_etiqueta / len(filas) < MATRIZ_ETIQUETAS_MIN:
+        return False
+
+    valores = [c for f in filas for col, c in por_fila[f].items() if col > 1]
+    if not valores:
+        return False
+    vacias = sum(1 for c in valores if not c.texto)
+    return vacias / len(valores) >= MATRIZ_VACIAS_MIN
+
+
+def _render_tabla(tabla: dict, bloques: dict, tinta, columnas: str = "columnas") -> str:
     celdas: list[Celda] = []
     for celda in _hijos(tabla, bloques, "CELL"):
         caja = celda["Geometry"]["BoundingBox"]
@@ -264,7 +406,7 @@ def _render_tabla(tabla: dict, bloques: dict, tinta) -> str:
                 rejilla_der=caja["Left"] + caja["Width"],
                 texto_izq=izq,
                 texto_der=der,
-                tinta=0.0 if texto else tinta(caja),
+                mancha=Mancha() if texto else tinta(caja),
             )
         )
     if not celdas:
@@ -280,25 +422,85 @@ def _render_tabla(tabla: dict, bloques: dict, tinta) -> str:
     # Centros tomados de la rejilla y no de las palabras: el centro de una
     # columna no debe moverse porque su encabezado sea más largo.
     centros = {c: celda.centro_rejilla for c, celda in cabecera.items() if c > 1}
+    umbral = _umbral_de_marca([c.mancha for c in celdas if not c.texto])
+
+    # La tabla decide cómo se lee. Solo una matriz comparativa admite que se
+    # redacte su significado; cualquier otra forma se vuelca sin interpretar.
+    if _es_matriz_comparativa(por_fila, cabeceras, umbral):
+        render = lambda fila: _render_fila(fila, cabeceras, centros, columnas, umbral)  # noqa: E731
+    else:
+        todas = (
+            _cabeceras(cabecera, incluir_primera=True)
+            if _parece_cabecera(cabecera, len(filas))
+            else {}
+        )
+        render = lambda fila: _render_fila_generica(fila, todas, umbral)  # noqa: E731
+
     lineas: list[str] = []
     for indice in filas[1:]:
-        linea = _render_fila(por_fila[indice], cabeceras, centros)
+        linea = render(por_fila[indice])
         if linea:
             lineas.append(linea)
     return "\n".join(lineas)
 
 
-def _cabeceras(primera_fila: dict[int, Celda]) -> dict[int, str]:
-    """Columna → su encabezado. La primera columna es la etiqueta de la fila."""
+def _cabeceras(primera_fila: dict[int, Celda], *, incluir_primera: bool = False) -> dict[int, str]:
+    """Columna → su encabezado.
+
+    En una matriz comparativa la primera columna no es una columna de datos sino
+    la etiqueta de la fila, y se excluye. En el volcado genérico sí cuenta, que
+    es lo que hace que cada fila se explique sola.
+    """
     return {
         columna: celda.texto
         for columna, celda in primera_fila.items()
-        if columna > 1 and celda.texto
+        if celda.texto and (incluir_primera or columna > 1)
     }
 
 
+def _parece_cabecera(primera_fila: dict[int, Celda], filas_totales: int) -> bool:
+    """¿La primera fila son encabezados de columna, o es contenido?
+
+    Si no lo son, el volcado genérico se limita a poner las celdas en orden. Es
+    menos informativo y es lo correcto: inventar un encabezado para un valor
+    afirma una relación entre dos textos que en el documento no existe.
+    """
+    if filas_totales < CABECERA_FILAS_MIN:
+        return False
+    textos = [c.texto for c in primera_fila.values() if c.texto]
+    if len(textos) < 2:
+        return False
+    largos = sorted(len(x) for x in textos)
+    mediana = largos[len(largos) // 2]
+    return mediana <= CABECERA_LARGO_MAX
+
+
+def _render_fila_generica(
+    fila: dict[int, Celda], cabeceras: dict[int, str], umbral: float | None
+) -> str:
+    """Vuelca una fila sin interpretarla, con cada valor junto a su encabezado.
+
+    Es el modo seguro por defecto: no afirma nada sobre el significado de la
+    rejilla. Cada fila lleva sus encabezados dentro a propósito — así un corte
+    de troceado no puede dejar cifras huérfanas de la columna a la que
+    pertenecen, que es la forma silenciosa de que una tabla mienta.
+    """
+    piezas: list[str] = []
+    for columna, celda in sorted(fila.items()):
+        encabezado = cabeceras.get(columna)
+        if celda.texto:
+            piezas.append(f"{encabezado}: {celda.texto}" if encabezado else celda.texto)
+        elif celda.marcada(umbral):
+            piezas.append(f"{encabezado}: [marcado]" if encabezado else "[marcado]")
+    return " | ".join(piezas)
+
+
 def _render_fila(
-    fila: dict[int, Celda], cabeceras: dict[int, str], centros: dict[int, float]
+    fila: dict[int, Celda],
+    cabeceras: dict[int, str],
+    centros: dict[int, float],
+    columnas: str = "columnas",
+    umbral: float | None = None,
 ) -> str:
     etiqueta = fila.get(1).texto if 1 in fila else ""
     if not etiqueta:
@@ -306,17 +508,17 @@ def _render_fila(
 
     valores = [c for col, c in sorted(fila.items()) if col > 1]
     grupos = _agrupar(c for c in valores if c.texto)
-    marcadas = [c for c in valores if not c.texto and TINTA_MARCA_MIN < c.tinta < TINTA_MARCA_MAX]
+    marcadas = [c for c in valores if c.marcada(umbral)]
 
     if grupos:
         return f"{etiqueta}: " + "; ".join(
             _frase_grupo(g, cabeceras, centros) for g in grupos
         )
     if marcadas:
-        columnas = [cabeceras.get(c.columna, f"columna {c.columna}") for c in marcadas]
+        nombres = [cabeceras.get(c.columna, f"columna {c.columna}") for c in marcadas]
         if len(marcadas) == len(valores) and len(valores) > 1:
-            return f"{etiqueta}: en todas las versiones ({', '.join(columnas)})"
-        return f"{etiqueta}: solo en {', '.join(columnas)}"
+            return f"{etiqueta}: en todas las {columnas} ({', '.join(nombres)})"
+        return f"{etiqueta}: solo en {', '.join(nombres)}"
     # Ni valor ni marca: es un encabezado de sección, o una fila que no se pudo
     # leer. Se emite como encabezado justamente porque un encabezado no afirma
     # nada — si fuera una fila ilegible, emitir la etiqueta suelta invitaría a

@@ -17,7 +17,7 @@ import pytest
 from rag_agent.domain.profile import OcrPolicy
 from rag_agent.infrastructure.ingest.ocr import PaginaExtraida, ResultadoOcr, build_motor
 from rag_agent.infrastructure.ingest.ocr import cache as ocr_cache
-from rag_agent.infrastructure.ingest.ocr.textract import _pagina
+from rag_agent.infrastructure.ingest.ocr.textract import Celda, Mancha, _pagina, _umbral_de_marca
 
 PIL = pytest.importorskip("PIL.Image")
 
@@ -109,6 +109,19 @@ def _con_cabecera(r: RespuestaFalsa) -> list[str]:
     ]
 
 
+def _relleno(r: RespuestaFalsa, desde: int = 20, filas: int = 8) -> list[str]:
+    """Filas de equipamiento vacías: lo que hace que una tabla *sea* una matriz.
+
+    Sin ellas la tabla tiene casi todas las celdas llenas y el detector la trata
+    —correctamente— como una tabla de datos cualquiera.
+    """
+    ids: list[str] = []
+    for fila in range(desde, desde + filas):
+        ids.append(r.celda(fila, 1, *COLUMNAS[0], texto=f"Equipamiento {fila}"))
+        ids += [r.celda(fila, c, *COLUMNAS[c - 1]) for c in range(2, 6)]
+    return ids
+
+
 # --- atribución de valores a columnas -----------------------------------------
 
 
@@ -123,6 +136,7 @@ def test_un_valor_centrado_vale_para_todas_las_versiones():
         # El texto está centrado sobre el área de valores (centro ≈ 0.71).
         r.celda(2, 3, *COLUMNAS[2], texto="4,113", texto_izq=0.70, texto_der=0.72),
     ]
+    ids += _relleno(r)
     r.tabla(ids)
 
     texto = _pagina(r.como_dict(), _imagen_blanca(), 1).texto
@@ -141,6 +155,7 @@ def test_dos_valores_distintos_se_reparten_entre_sus_columnas():
         r.celda(3, 2, *COLUMNAS[1], texto="MT", texto_izq=0.50, texto_der=0.53),
         r.celda(3, 5, *COLUMNAS[4], texto="CVT", texto_izq=0.88, texto_der=0.92),
     ]
+    ids += _relleno(r)
     r.tabla(ids)
 
     texto = _pagina(r.como_dict(), _imagen_blanca(), 1).texto
@@ -159,6 +174,7 @@ def test_un_valor_partido_entre_celdas_se_reagrupa():
         r.celda(4, 3, *COLUMNAS[2], texto="108 HP", texto_izq=0.66, texto_der=0.705),
         r.celda(4, 4, *COLUMNAS[3], texto="rpm", texto_izq=0.707, texto_der=0.75),
     ]
+    ids += _relleno(r)
     r.tabla(ids)
 
     texto = _pagina(r.como_dict(), _imagen_blanca(), 1).texto
@@ -182,6 +198,7 @@ def test_una_vineta_se_lee_como_disponibilidad_de_esa_version():
         r.celda(5, 4, *COLUMNAS[3]),
         r.celda(5, 5, *COLUMNAS[4]),
     ]
+    ids += _relleno(r)
     r.tabla(ids)
     # La viñeta se pinta en el centro de la última columna, en la fila 5.
     centro_x = (COLUMNAS[4][0] + COLUMNAS[4][1]) / 2
@@ -201,6 +218,7 @@ def test_una_fila_sin_valores_ni_vinetas_se_emite_como_encabezado():
     ids += [r.celda(6, 1, *COLUMNAS[0], texto="CONFORT")] + [
         r.celda(6, c, *COLUMNAS[c - 1]) for c in range(2, 6)
     ]
+    ids += _relleno(r)
     r.tabla(ids)
 
     texto = _pagina(r.como_dict(), _imagen_blanca(), 1).texto
@@ -285,3 +303,113 @@ def test_un_cache_de_otra_version_del_formato_no_se_reutiliza(tmp_path):
     (tmp_path / "k.json").write_text(json.dumps({"paginas": []}), encoding="utf-8")
 
     assert ocr_cache.leer(tmp_path, "k") is None
+
+
+# --- qué formas de tabla se interpretan y cuáles no ---------------------------
+
+
+def _tabla_financiera(r: RespuestaFalsa) -> list[str]:
+    """Filas y columnas llenas de cifras: una tabla de datos, no una matriz."""
+    ids = [
+        r.celda(1, 1, 0.05, 0.45, texto="Concepto"),
+        r.celda(1, 2, 0.45, 0.71, texto="2024"),
+        r.celda(1, 3, 0.71, 0.97, texto="2025"),
+    ]
+    for fila, (concepto, a, b) in enumerate(
+        [("Ingresos", "125", "140"), ("Costos", "87", "92"), ("Margen", "38", "48")], start=2
+    ):
+        ids += [
+            r.celda(fila, 1, 0.05, 0.45, texto=concepto),
+            r.celda(fila, 2, 0.45, 0.71, texto=a),
+            r.celda(fila, 3, 0.71, 0.97, texto=b),
+        ]
+    return ids
+
+
+def test_una_tabla_de_datos_no_se_interpreta_como_ficha_comparativa():
+    """Las frases «solo en X» y «vale para todas» afirman algo sobre el
+    significado de la rejilla. En un balance ese significado no existe, y
+    redactarlo igualmente inventaría un sentido que la tabla no tiene."""
+    r = RespuestaFalsa()
+    r.tabla(_tabla_financiera(r))
+
+    texto = _pagina(r.como_dict(), _imagen_blanca(), 1).texto
+
+    assert "solo en" not in texto
+    assert "en todas las" not in texto
+
+
+def test_una_tabla_de_datos_conserva_cada_cifra_junto_a_su_columna():
+    """Cada fila lleva sus encabezados dentro: un corte de troceado no puede
+    dejar una cifra huérfana de la columna a la que pertenece."""
+    r = RespuestaFalsa()
+    r.tabla(_tabla_financiera(r))
+
+    texto = _pagina(r.como_dict(), _imagen_blanca(), 1).texto
+
+    assert "Concepto: Ingresos | 2024: 125 | 2025: 140" in texto
+    assert "Concepto: Margen | 2024: 38 | 2025: 48" in texto
+
+
+def test_el_nombre_de_las_columnas_lo_pone_el_perfil():
+    """«en todas las versiones» es vocabulario de coches. En una tabla
+    trimestral la misma frase sería sencillamente falsa."""
+    r = RespuestaFalsa()
+    ids = _con_cabecera(r) + [
+        r.celda(7, 1, *COLUMNAS[0], texto="Cobertura"),
+        *[r.celda(7, c, *COLUMNAS[c - 1]) for c in range(2, 6)],
+    ]
+    ids += _relleno(r)
+    r.tabla(ids)
+    texto = _pagina(r.como_dict(), _imagen_blanca(), 1, "periodos").texto
+
+    assert "versiones" not in texto
+
+
+def test_sin_separacion_clara_no_se_emite_ninguna_marca():
+    """Si todas las celdas tienen algo de tinta —un sombreado, un icono— no hay
+    forma de saber cuál es una viñeta. Antes se aplicaba una banda fija afinada
+    sobre un corpus y cualquier adorno de otro documento pasaba por marca."""
+    manchas = [Mancha(fraccion=0.02, compacta=True) for _ in range(8)]
+
+    assert _umbral_de_marca(manchas) is None
+
+
+def test_una_mancha_ancha_no_es_una_vineta():
+    """Un sombreado de fondo cubre la celda; una viñeta es pequeña y centrada."""
+    sombreada = Mancha(fraccion=0.005, compacta=False)
+    vineta = Mancha(fraccion=0.005, compacta=True)
+
+    assert not sombreada.posible_marca
+    assert vineta.posible_marca
+
+
+def test_una_celda_sombreada_no_se_lee_como_marcada():
+    celda = Celda(
+        fila=2, columna=3, texto="", rejilla_izq=0.4, rejilla_der=0.6,
+        mancha=Mancha(fraccion=0.01, compacta=False),
+    )
+
+    assert not celda.marcada(umbral=0.002)
+
+
+def test_una_maquetacion_en_rejilla_no_recibe_encabezados_inventados():
+    """Textract marca como TABLE una plana de folleto con bloques de texto en
+    fila. Tomar la primera fila como encabezados empareja cosas que no van
+    juntas, y ese emparejamiento es una afirmación falsa."""
+    r = RespuestaFalsa()
+    ids = []
+    bloques = [
+        ("1030 km Autonomía combinada NEDC", "4.9 s Aceleración de 0 a 100 km/h", "152 km Autonomía eléctrica"),
+        ("3 filas de asientos", "Control de amortiguación", "Tracción integral"),
+        ("Capacidad para 7 pasajeros", "Suprime balanceo y cabeceo", "AWD inteligente"),
+    ]
+    for fila, celdas in enumerate(bloques, start=1):
+        for columna, texto in enumerate(celdas, start=1):
+            ids.append(r.celda(fila, columna, 0.05 + 0.3 * (columna - 1), 0.32 + 0.3 * (columna - 1), texto=texto))
+    r.tabla(ids)
+
+    texto = _pagina(r.como_dict(), _imagen_blanca(), 1).texto
+
+    assert "1030 km Autonomía combinada NEDC: 3 filas de asientos" not in texto
+    assert "3 filas de asientos | Control de amortiguación | Tracción integral" in texto

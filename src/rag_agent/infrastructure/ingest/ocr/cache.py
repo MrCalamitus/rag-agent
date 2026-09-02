@@ -18,7 +18,16 @@ from pathlib import Path
 
 from . import PaginaExtraida, ResultadoOcr
 
-VERSION = 1
+# Se sube cuando cambia **cómo se redacta** la transcripción, no solo cómo se
+# obtiene: el caché guarda el texto ya redactado, así que un render nuevo sobre
+# un caché viejo mezclaría dos formatos en el mismo corpus. Subirla obliga a
+# volver a transcribir, que cuesta dinero — es el precio de guardar texto en vez
+# de la respuesta cruda del motor, y está anotado como mejora pendiente.
+#
+#   1 → primera versión
+#   2 → detección de forma de tabla y volcado genérico; «columnas» del perfil
+#   3 → no se inventan encabezados sobre maquetaciones que no son tablas
+VERSION = 3
 
 
 def clave(pdf: Path, *, motor: str, dpi: int) -> str:

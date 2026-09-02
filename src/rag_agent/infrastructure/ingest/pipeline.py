@@ -93,6 +93,7 @@ def extraer(archivo: Path, profile: Profile, ocr=None) -> Documento | None:
             banned=profile.banned_markers,
             ocr=ocr,
             min_chars=profile.ocr.min_chars,
+            cleanup=profile.cleanup,
         )
         if documento is not None:
             return documento
@@ -223,7 +224,7 @@ def escanear_ocr(origen: Path, profile: Profile, carpeta_cache: Path) -> list[Ca
             lector = PdfReader(ruta)
             if lector.is_encrypted:
                 lector.decrypt("")
-            texto = limpiar([p.extract_text() or "" for p in lector.pages])
+            texto = limpiar([p.extract_text() or "" for p in lector.pages], profile.cleanup)
         except Exception:  # noqa: BLE001 - un PDF ilegible se reporta en la preparación
             continue
         if len(texto) >= profile.ocr.min_chars:

@@ -48,6 +48,9 @@ ocr:
   dpi: 200
   max_paginas: 20
   idioma: spa
+  # Cómo llamar a las columnas al redactar una tabla comparativa. Aquí son
+  # versiones de un modelo; en un corpus financiero serían «periodos».
+  columnas: versiones
 
 chunking:
   max_chars: 2000

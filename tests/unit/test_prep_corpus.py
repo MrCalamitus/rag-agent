@@ -307,3 +307,79 @@ def test_sin_ocr_un_pdf_ilegible_dice_como_activarlo(tmp_path, monkeypatch):
     reporte = preparar(tmp_path, PUBLICO)
 
     assert any("ocr.motor" in motivo for _, motivo in reporte.sin_texto)
+
+
+# --- limpieza del texto extraído ----------------------------------------------
+
+
+def test_una_tabla_numerica_conserva_todas_sus_cifras():
+    """El fallo que motivó esta fase: `limpiar` descartaba cualquier número
+    suelto por parecerse a un folio. En un PDF cuya capa de texto pone etiqueta
+    y valor en líneas separadas —lo normal en tablas financieras— eso borraba
+    todos los valores y dejaba el documento con todas sus etiquetas: un corpus
+    que parece correcto y no puede responder nada."""
+    from rag_agent.infrastructure.ingest.extractors import limpiar
+
+    pagina = "\n".join(
+        ["Estado de resultados", "Ingresos", "125", "Costos", "87",
+         "Margen operativo", "38", "Provisiones", "0", "0", "Impuestos", "12"]
+    )
+
+    salida = limpiar([pagina]).splitlines()
+
+    for cifra in ("125", "87", "38", "12"):
+        assert cifra in salida
+    assert salida.count("0") == 2, "un cero repetido en dos filas son dos datos"
+
+
+def test_los_folios_se_quitan_solo_si_forman_una_serie_creciente():
+    """La posición sola no basta: un balance puede acabar una página en «0». Un
+    folio de verdad crece de página en página."""
+    from rag_agent.infrastructure.ingest.extractors import limpiar
+
+    con_folios = limpiar([f"contenido {i}\n{i + 1}" for i in range(6)]).splitlines()
+    con_datos = limpiar([f"contenido {i}\n0" for i in range(6)]).splitlines()
+
+    assert con_folios == [f"contenido {i}" for i in range(6)]
+    assert con_datos.count("0") == 6
+
+
+def test_un_folio_escrito_con_letras_se_quita_este_donde_este():
+    from rag_agent.infrastructure.ingest.extractors import limpiar
+
+    assert limpiar(["Ingresos\nPágina 3 de 12\n125"]).splitlines() == ["Ingresos", "125"]
+
+
+def test_de_una_linea_corrida_se_conserva_la_primera_aparicion():
+    """Suele ser el modelo o el título. Borrarla de todas partes deja los
+    fragmentos del medio del documento sin decir de qué hablan."""
+    from rag_agent.infrastructure.ingest.extractors import limpiar
+
+    paginas = [f"MAZDA2 SEDÁN 2026\ndato {i}\nAviso legal" for i in range(8)]
+
+    salida = limpiar(paginas).splitlines()
+
+    assert salida.count("MAZDA2 SEDÁN 2026") == 1
+    assert salida.count("Aviso legal") == 1
+    assert salida[0] == "MAZDA2 SEDÁN 2026", "el título se conserva al principio"
+
+
+def test_un_documento_corto_no_deduplica_nada():
+    """Con dos páginas, «repetido en la mayoría» y «aparece dos veces» son lo
+    mismo, y borrar contenido legítimo es peor que dejar un pie duplicado."""
+    from rag_agent.infrastructure.ingest.extractors import limpiar
+
+    salida = limpiar(["Total\n0", "Total\n0"]).splitlines()
+
+    assert salida == ["Total", "0", "Total", "0"]
+
+
+def test_la_politica_de_limpieza_se_puede_desactivar():
+    from rag_agent.domain.profile import CleanupPolicy
+    from rag_agent.infrastructure.ingest.extractors import limpiar
+
+    paginas = [f"c{i}\n{i + 1}" for i in range(6)]
+
+    sin_folios = limpiar(paginas, CleanupPolicy(folio_lineas_borde=0)).splitlines()
+
+    assert sin_folios == ["c0", "1", "c1", "2", "c2", "3", "c3", "4", "c4", "5", "c5", "6"]

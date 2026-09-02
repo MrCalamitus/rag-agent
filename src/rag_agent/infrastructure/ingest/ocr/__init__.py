@@ -97,7 +97,12 @@ def build_motor(policy) -> MotorOcr | None:
         from .textract import TextractOcr
 
         ajustes = Settings()
-        return TextractOcr(dpi=policy.dpi, region=ajustes.aws_region, profile=ajustes.aws_profile)
+        return TextractOcr(
+            dpi=policy.dpi,
+            region=ajustes.aws_region,
+            profile=ajustes.aws_profile,
+            columnas=policy.columnas,
+        )
     from .tesseract import TesseractOcr
 
     return TesseractOcr()
