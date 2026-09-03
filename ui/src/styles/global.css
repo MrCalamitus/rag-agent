@@ -638,3 +638,89 @@ textarea {
 [hidden] {
   display: none !important;
 }
+
+/* --- Markdown en la respuesta del agente -----------------------------------
+   El agente contesta en markdown y antes se pintaba en crudo: una tabla salia
+   como una reja de pipes. Estos estilos son para lo que renderMarkdown() emite. */
+
+.turn__text--rich > :first-child { margin-top: 0; }
+.turn__text--rich > :last-child { margin-bottom: 0; }
+
+.turn__text--rich p { margin: 0 0 0.75em; }
+.turn__text--rich h3,
+.turn__text--rich h4,
+.turn__text--rich h5,
+.turn__text--rich h6 { margin: 1.2em 0 0.5em; line-height: 1.3; }
+.turn__text--rich ul,
+.turn__text--rich ol { margin: 0 0 0.75em; padding-left: 1.4em; }
+.turn__text--rich li { margin: 0.2em 0; }
+
+.turn__text--rich blockquote {
+  margin: 0 0 0.75em;
+  padding: 0.1em 0 0.1em 0.9em;
+  border-left: 3px solid var(--border, #d8d8d8);
+  color: var(--text-muted, #5b5b5b);
+}
+
+.turn__text--rich code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9em;
+  padding: 0.12em 0.35em;
+  border-radius: 4px;
+  background: var(--surface-alt, rgba(0, 0, 0, 0.05));
+}
+.turn__text--rich pre {
+  margin: 0 0 0.75em;
+  padding: 0.8em 1em;
+  overflow-x: auto;
+  border-radius: 8px;
+  background: var(--surface-alt, rgba(0, 0, 0, 0.05));
+}
+.turn__text--rich pre code { padding: 0; background: none; }
+
+/* Una tabla de seis trimestres no cabe en un movil. Se desplaza ella, dentro de
+   su envoltorio, en vez de ensanchar la burbuja y romper el hilo entero. */
+.md-table-wrap {
+  margin: 0 0 0.9em;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.md-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.94em;
+  font-variant-numeric: tabular-nums; /* las cifras alinean por columna */
+}
+
+.md-table th,
+.md-table td {
+  padding: 0.45em 0.8em;
+  text-align: left;
+  border-bottom: 1px solid var(--border, #e6e6e6);
+  white-space: nowrap;
+}
+
+/* La primera columna es la etiqueta de fila y si puede debe partir: los nombres
+   de cartera son largos y forzarlos en una linea empuja las cifras fuera. */
+.md-table th:first-child,
+.md-table td:first-child { white-space: normal; min-width: 9rem; }
+
+.md-table thead th {
+  font-weight: 600;
+  border-bottom-width: 2px;
+  background: var(--surface-alt, rgba(0, 0, 0, 0.03));
+  position: sticky;
+  top: 0;
+}
+
+.md-table tbody tr:last-child td { border-bottom: none; }
+.md-table tbody tr:hover { background: var(--surface-alt, rgba(0, 0, 0, 0.02)); }
+
+@media (prefers-color-scheme: dark) {
+  .turn__text--rich code,
+  .turn__text--rich pre,
+  .md-table thead th { background: rgba(255, 255, 255, 0.06); }
+  .md-table th,
+  .md-table td { border-bottom-color: rgba(255, 255, 255, 0.12); }
+}

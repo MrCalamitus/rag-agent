@@ -7,6 +7,7 @@
  * detrás de `/api/chat` y aquí no hay forma de alcanzarlo.
  */
 
+import { renderMarkdown } from "./markdown";
 import { readSse } from "../../lib/sse";
 import { openDocument } from "./viewer";
 import {
@@ -209,6 +210,10 @@ function appendAgentTurn(thread: HTMLElement): AgentTurn {
 
   return {
     setText(value) {
+      // Durante el stream se pinta en crudo: el markdown se renderiza una sola
+      // vez al final. Reparsear en cada delta haria parpadear la tabla fila a
+      // fila mientras llega, y una valla de codigo a medio cerrar se veria como
+      // texto suelto hasta que cerrara.
       body.textContent = value;
       scrollToEnd();
     },
@@ -237,6 +242,9 @@ function appendAgentTurn(thread: HTMLElement): AgentTurn {
     },
     finish(text) {
       if (text === "") return;
+      // Ya esta el texto completo: ahora si se puede interpretar el markdown.
+      body.replaceChildren(renderMarkdown(text));
+      body.classList.add("turn__text--rich");
       actions.hidden = false;
       copy.addEventListener("click", async () => {
         try {
