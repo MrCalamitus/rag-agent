@@ -1,0 +1,37 @@
+---
+/**
+ * El panel de evidencia: los fragmentos que sustentaron la respuesta.
+ *
+ * Existe porque el contrato emite la recuperación como un ítem de salida y no
+ * como un paso invisible del servidor. Enseñarlo es lo que convierte "confía en
+ * mí" en "míralo tú": cualquier respuesta se puede auditar sin abrir un log.
+ *
+ * Este componente es la plantilla que el cliente clona; el marcado equivalente
+ * vive en `client/chat.ts`, y los dos deben cambiar juntos.
+ *
+ * `<details>` nativo a propósito: plegado accesible, con teclado y sin JS.
+ */
+import Icon from "./Icon.astro";
+---
+
+<template id="tpl-sources">
+  <details class="sources">
+    <summary>
+      <Icon name="description" size={18} />
+      <span data-summary></span>
+      <Icon name="expand_more" size={18} class="chevron" />
+    </summary>
+    <div class="sources__list" data-list></div>
+  </details>
+</template>
+
+<template id="tpl-source">
+  <div class="source">
+    <div class="source__head">
+      <span class="source__name" data-name></span>
+      <span class="source__score" data-score></span>
+    </div>
+    <div class="source__meta" data-meta hidden></div>
+    <div class="source__chunk" data-chunk></div>
+  </div>
+</template>

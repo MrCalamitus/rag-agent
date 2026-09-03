@@ -67,9 +67,9 @@ def test_los_perfiles_del_repositorio_son_validos(tmp_path):
     """Guarda contra editar un YAML y romper el arranque sin enterarse."""
     perfiles = load_profiles("profiles")
 
-    assert {"luis-cv", "coches"} <= set(perfiles)
+    assert {"luis-cv", "autos"} <= set(perfiles)
     assert perfiles["luis-cv"].profile.masks_identifiers
-    assert not perfiles["coches"].profile.masks_identifiers
+    assert not perfiles["autos"].profile.masks_identifiers
 
 
 def test_una_carpeta_sin_perfiles_devuelve_un_mapa_vacio(tmp_path):

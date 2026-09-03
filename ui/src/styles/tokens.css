@@ -1,0 +1,77 @@
+/*
+ * Un solo sitio donde vive el aspecto. Todo lo demás consume estas variables:
+ * si mañana esta UI sirve otro corpus con otra marca, se toca este archivo y
+ * nada más.
+ */
+
+:root {
+  color-scheme: light dark;
+
+  /* Escala de 4 px. Nada de valores sueltos en el resto de la hoja. */
+  --sp-1: 0.25rem;
+  --sp-2: 0.5rem;
+  --sp-3: 0.75rem;
+  --sp-4: 1rem;
+  --sp-5: 1.5rem;
+  --sp-6: 2rem;
+  --sp-7: 3rem;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-pill: 999px;
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  --text-xs: 0.75rem;
+  --text-sm: 0.8125rem;
+  --text-base: 0.9375rem;
+  --text-lg: 1.0625rem;
+  --text-xl: 1.375rem;
+
+  /* Ancho de medida del hilo: por encima de ~70ch la lectura se rompe. */
+  --measure: 68ch;
+
+  /* Claro. Contrastes verificados sobre --surface: texto 4.5:1, UI 3:1. */
+  --surface: #fbfbfa;
+  --surface-raised: #ffffff;
+  --surface-sunken: #f1f0ee;
+  --border: #d9d7d2;
+  --border-strong: #b3afa8;
+  --ink: #1c1b19;
+  --ink-muted: #5f5b54;
+  --ink-faint: #837e75;
+  --accent: #7a4b1e;
+  --accent-ink: #ffffff;
+  --accent-soft: #f3e8dc;
+  --danger: #9a2f26;
+  --danger-soft: #fbeae8;
+  --focus: #1e5a8f;
+
+  --shadow-sm: 0 1px 2px rgb(28 27 25 / 0.06);
+  --shadow-md: 0 2px 12px rgb(28 27 25 / 0.08);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface: #17161a;
+    --surface-raised: #201f24;
+    --surface-sunken: #121116;
+    --border: #35333b;
+    --border-strong: #57545f;
+    --ink: #ece9e6;
+    --ink-muted: #a9a49f;
+    --ink-faint: #857f7a;
+    --accent: #d9a066;
+    --accent-ink: #241705;
+    --accent-soft: #2e2519;
+    --danger: #f0918a;
+    --danger-soft: #331c1b;
+    --focus: #7fb4e6;
+
+    --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
+    --shadow-md: 0 2px 12px rgb(0 0 0 / 0.45);
+  }
+}

@@ -178,3 +178,9 @@ reports/
 
 # Corpus preparado por `make corpus`: se regenera, no se versiona.
 .corpus-preparado/
+
+# UI (Astro). El lock SÍ se versiona, por lo mismo que el de Terraform.
+ui/node_modules/
+ui/dist/
+ui/.astro/
+ui/.env

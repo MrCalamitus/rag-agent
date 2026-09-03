@@ -1,0 +1,117 @@
+---
+/**
+ * La portada. Una sola página, un solo tema.
+ *
+ * El título y la descripción salen del PERFIL, no de constantes escritas aquí:
+ * el YAML del servicio ya dice de qué habla este corpus, y duplicarlo en el
+ * frontend garantiza que un día digan cosas distintas. Si el slug configurado no
+ * existe en el despliegue, la página lo dice ahora, en vez de dejar que cada
+ * pregunta muera con un 400 `profile_not_found`.
+ */
+import Chat from "../components/Chat.astro";
+import Icon from "../components/Icon.astro";
+import { getConfig } from "../config";
+import { fetchProfile } from "../lib/rag";
+import type { Profile } from "../lib/types";
+import "../styles/global.css";
+import "@material-symbols/font-400/rounded.css";
+
+export const prerender = false;
+
+let profile: Profile | null = null;
+let problema: string | null = null;
+let slug = "";
+
+try {
+  const config = getConfig();
+  slug = config.profile;
+  profile = await fetchProfile();
+  if (!profile) {
+    problema = `El despliegue no sirve ningún tema con el slug «${slug}». Revisa RAG_PROFILE en ui/.env y los archivos de profiles/.`;
+  }
+} catch (error) {
+  // Cubre las dos cosas que pueden ir mal antes de la primera pregunta: falta
+  // una variable de entorno, o el agente no responde. Las dos se dicen aquí y
+  // ahora, no pregunta a pregunta.
+  problema = (error as Error).message;
+}
+
+const config = safeConfig();
+
+const title = config?.title ?? profile?.name ?? "Agente documental";
+const intro =
+  config?.intro ??
+  (profile ? `Respondo sobre ${profile.subject}, y solo con lo que consta en los documentos.` : "");
+
+// Las sugerencias se derivan del tema: en `autos` invitan a preguntar por una
+// versión, en `luis-cv` por una credencial. Son texto de arranque, no un menú.
+const suggestions = profile
+  ? [
+      `¿Qué documentación hay disponible sobre ${shorten(profile.subject)}?`,
+      "Resume lo más relevante que conste en los documentos.",
+      "¿Qué NO puedes responder con esta documentación?",
+    ]
+  : [];
+
+/** La configuración, o `null` si está incompleta: la página debe poder pintar el aviso. */
+function safeConfig() {
+  try {
+    return getConfig();
+  } catch {
+    return null;
+  }
+}
+
+/** Corta por palabra, no por carácter: «especificaciones té…» no es un recorte. */
+function shorten(subject: string, limit = 52): string {
+  const clean = subject.replace(/\s+/g, " ").trim();
+  if (clean.length <= limit) return clean;
+  const cut = clean.lastIndexOf(" ", limit);
+  return `${clean.slice(0, cut > 20 ? cut : limit).replace(/[,;:]$/, "")}…`;
+}
+---
+
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content={intro || title} />
+    <meta name="robots" content="noindex" />
+    <title>{title}</title>
+  </head>
+  <body>
+    <div class="page">
+      <a class="skip-link" href="#conversacion">Ir a la conversación</a>
+
+      <header class="site-header">
+        <div class="wrap">
+          <h1>{title}</h1>
+          {intro && <p>{intro}</p>}
+          {
+            profile?.masks_identifiers && (
+              <p class="badge">
+                <Icon name="shield" size={14} />
+                Los identificadores personales salen enmascarados
+              </p>
+            )
+          }
+        </div>
+      </header>
+
+      {
+        problema ? (
+          <main id="conversacion" class="wrap thread">
+            <div class="notice notice--error">
+              <Icon name="error" size={18} />
+              <span>
+                <strong>Configuración incompleta.</strong> {problema}
+              </span>
+            </div>
+          </main>
+        ) : (
+          <Chat suggestions={suggestions} />
+        )
+      }
+    </div>
+  </body>
+</html>

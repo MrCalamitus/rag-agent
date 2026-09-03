@@ -62,13 +62,13 @@ eval: .venv ## Preguntas de oro y reporte (PROFILE=tema, GOLDEN=ruta, MODELS=ali
 
 .PHONY: corpus
 corpus: .venv ## Prepara el corpus de un tema (PROFILE=slug; SOURCE/OUT opcionales)
-	@test -n "$$PROFILE" || (echo "Uso: make corpus PROFILE=coches" && exit 1)
-	$(PY) scripts/prep_corpus.py --profile $$PROFILE \
-		$${SOURCE:+--source $$SOURCE} $${OUT:+--out $$OUT} $${SKIP:+--skip $$SKIP}
+	@test -n "$$PROFILE" || (echo "Uso: make corpus PROFILE=autos" && exit 1)
+	$(PY) scripts/prep_corpus.py --profile $$PROFILE --no-ocr\
+		$${SOURCE:+--source $$SOURCE} $${OUT:+--out $$OUT} $${SKIP:+--skip $$SKIP} 
 
 .PHONY: sync-kb
 sync-kb: ## Sube el corpus de un tema a S3 y lanza la ingesta (PROFILE=slug)
-	@test -n "$$PROFILE" -o -n "$$CORPUS" || (echo "Uso: make sync-kb PROFILE=coches" && exit 1)
+	@test -n "$$PROFILE" -o -n "$$CORPUS" || (echo "Uso: make sync-kb PROFILE=autos" && exit 1)
 	RAG_PROFILE=$$PROFILE ./scripts/sync-kb.sh $$CORPUS
 
 .PHONY: smoke
@@ -86,6 +86,26 @@ deploy: ## Guarda de cuenta + build + push + apply
 .PHONY: destroy
 destroy: ## Destruye la infraestructura (pide confirmación)
 	terraform -chdir=infra destroy
+
+# --- UI --------------------------------------------------------------------
+# La interfaz web vive en `ui/` y se despliega aparte. Estos objetivos son
+# atajos: no se enganchan a `test` ni a `deploy`, y borrar `ui/` no rompe nada.
+
+.PHONY: ui-install
+ui-install: ## Instala las dependencias de la interfaz web
+	cd ui && npm install
+
+.PHONY: ui-dev
+ui-dev: ## Levanta la interfaz web en local (necesita `make run` en otra terminal)
+	cd ui && npm run dev
+
+.PHONY: ui-build
+ui-build: ## Compila la interfaz web a ui/dist
+	cd ui && npm run build
+
+.PHONY: ui-test
+ui-test: ## Pruebas de la interfaz web
+	cd ui && npm test
 
 .PHONY: docker-build
 docker-build: ## Construye la imagen del servicio

@@ -4,7 +4,7 @@
 # opuesto al de credenciales y por eso sirve de contraste — aquí el troceado es
 # imprescindible y el enmascarado sería dañino (taparía potencias y precios).
 
-slug: coches
+slug: autos
 name: Marcas y modelos de coches
 
 subject: >-
@@ -66,4 +66,4 @@ banned_markers: []
 
 corpus:
   source: corpus
-  prepared: .corpus-preparado/coches
+  prepared: .corpus-preparado/autos

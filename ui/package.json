@@ -1,0 +1,25 @@
+{
+  "name": "rag-agent-ui",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Interfaz web del agente RAG. Vive aparte del servicio: lo consume por HTTP.",
+  "scripts": {
+    "dev": "node --env-file-if-exists=.env ./node_modules/.bin/astro dev",
+    "build": "astro build",
+    "preview": "node --env-file-if-exists=.env ./dist/server/entry.mjs",
+    "check": "astro check",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@astrojs/node": "^9.0.0",
+    "@material-symbols/font-400": "^0.31.0",
+    "astro": "^5.0.0"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.10",
+    "@types/node": "^26.4.1",
+    "typescript": "^5.6.0",
+    "vitest": "^3.0.0"
+  }
+}
