@@ -22,6 +22,11 @@ dependencies = [
 #   pypdf[crypto] descifra los PDF con contraseña de propietario vacía
 #   pypdfium2     rasteriza para el OCR (BSD/Apache; PyMuPDF es AGPL)
 ingest = ["pypdf[crypto]>=6.0", "pypdfium2>=4.30", "pillow>=10.0"]
+# Banco de pruebas de extracción (scripts/lab/). Arrastra torch y los modelos de
+# layout y de tabla, que se descargan en la primera conversión: fuera de `dev` a
+# propósito, para que instalar el proyecto no cueste dos gigas. Se está midiendo
+# contra pypdf+Textract; si gana, esto deja de ser un extra opcional.
+docling = ["docling>=2.0"]
 dev = [
     "pytest>=8.3", "pytest-asyncio>=0.24", "httpx>=0.27", "anyio>=4.4", "pyyaml>=6.0",
     "rag-agent[ingest]",

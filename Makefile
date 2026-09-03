@@ -66,6 +66,23 @@ corpus: .venv ## Prepara el corpus de un tema (PROFILE=slug; SOURCE/OUT opcional
 	$(PY) scripts/prep_corpus.py --profile $$PROFILE --no-ocr\
 		$${SOURCE:+--source $$SOURCE} $${OUT:+--out $$OUT} $${SKIP:+--skip $$SKIP} 
 
+.PHONY: corpus-docling
+corpus-docling: .venv ## Prepara el corpus con Docling, en paralelo al normal (PROFILE=slug; OCR=1)
+	@test -n "$$PROFILE" || (echo "Uso: make corpus-docling PROFILE=autos [OCR=1]" && exit 1)
+	@$(PY) -c "import docling" 2>/dev/null || \
+		(echo "Falta docling: $(PIP) install -e \".[docling]\"" && exit 1)
+	$(PY) scripts/prep_corpus_docling.py --profile $$PROFILE $${OCR:+--docling-ocr} \
+		$${SOURCE:+--source $$SOURCE} $${OUT:+--out $$OUT} $${SKIP:+--skip $$SKIP} $${ONLY:+--only $$ONLY}
+
+.PHONY: corpus-compare
+corpus-compare: .venv ## Compara los dos corpus de un tema y mide cuál permite responder (PROFILE=slug)
+	@test -n "$$PROFILE" || (echo "Uso: make corpus-compare PROFILE=autos" && exit 1)
+	@test -n "$$A" -a -n "$$B" || (echo "Uso: make corpus-compare PROFILE=autos A=<dir> B=<dir>" && exit 1)
+	$(PY) scripts/compare_corpus.py --a $$A --b $$B
+	@echo
+	$(PY) scripts/lab/eval_recuperacion.py --generar $$B --out $${BANCO:-/tmp/preguntas-$$PROFILE.json}
+	$(PY) scripts/lab/eval_recuperacion.py --a $$A --b $$B --preguntas $${BANCO:-/tmp/preguntas-$$PROFILE.json}
+
 .PHONY: sync-kb
 sync-kb: ## Sube el corpus de un tema a S3 y lanza la ingesta (PROFILE=slug)
 	@test -n "$$PROFILE" -o -n "$$CORPUS" || (echo "Uso: make sync-kb PROFILE=autos" && exit 1)
