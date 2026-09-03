@@ -28,6 +28,10 @@ def item_to_dict(item: OutputItem) -> dict[str, Any]:
                     "chunk": chunk.text,
                     "score": chunk.score,
                     "metadata": chunk.metadata,
+                    # Extensión del ítem: si el perfil deja consultar el
+                    # documento original de este fragmento. El cliente no tiene
+                    # que conocer la política para saberlo.
+                    "exposed": chunk.exposed,
                 }
                 for chunk in item.outcome.chunks
             ],

@@ -11,12 +11,14 @@ import Sources from "./Sources.astro";
 
 interface Props {
   suggestions: string[];
+  /** Si el tema publica alguno de sus documentos originales. */
+  exposesDocuments: boolean;
 }
 
-const { suggestions } = Astro.props;
+const { suggestions, exposesDocuments } = Astro.props;
 ---
 
-<div data-chat>
+<div data-chat data-exposes={exposesDocuments ? "1" : "0"}>
   <main id="conversacion" class="wrap thread" data-thread tabindex="-1">
     <section class="empty" data-empty>
       <h2>Pregunta sobre la documentación</h2>

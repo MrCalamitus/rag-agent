@@ -18,15 +18,25 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ...domain.profile import ChunkPolicy, CleanupPolicy, OcrPolicy, Profile, RetrievalPolicy
+from ...domain.profile import (
+    ChunkPolicy,
+    CleanupPolicy,
+    DocumentClass,
+    DocumentPolicy,
+    OcrPolicy,
+    Profile,
+    RetrievalPolicy,
+)
 from ...domain.redaction import RedactionPolicy
 
 _CLAVES = {
     "slug", "name", "subject", "sources", "decline_phrase", "extra_rules",
     "redaction", "retrieval", "chunking", "ocr", "cleanup", "path_metadata", "banned_markers",
-    "corpus", "knowledge_base_id",
+    "corpus", "knowledge_base_id", "documentos",
 }
 _CLAVES_CORPUS = {"source", "prepared"}
+_CLAVES_DOCUMENTOS = {"expone", "por_defecto", "clases"}
+_CLAVES_CLASE = {"rutas", "tipos", "marcadores"}
 
 
 class ProfileError(ValueError):
@@ -63,6 +73,51 @@ def _tramo(datos: dict[str, Any], clave: str, permitidas: set[str], origen: str)
     return valor
 
 
+def _documentos(datos: dict[str, Any], origen: str) -> DocumentPolicy:
+    """El bloque `documentos:` del YAML.
+
+    Se valida con la misma dureza que el resto: una clase mal escrita en
+    `expone` no expondría nada y no diría por qué, y el error simétrico
+    —escribir bien la clase que no se quería exponer— publicaría archivos en
+    silencio. `DocumentPolicy` rechaza ambos.
+    """
+    crudas = datos.get("clases") or {}
+    _exigir(isinstance(crudas, dict), f"{origen}: 'documentos.clases' debe ser un mapa")
+
+    clases: list[DocumentClass] = []
+    for nombre, cuerpo in crudas.items():
+        cuerpo = cuerpo or {}
+        _exigir(
+            isinstance(cuerpo, dict),
+            f"{origen}: la clase '{nombre}' debe ser un mapa con {sorted(_CLAVES_CLASE)}",
+        )
+        sobrantes = set(cuerpo) - _CLAVES_CLASE
+        _exigir(
+            not sobrantes,
+            f"{origen}: claves desconocidas en la clase '{nombre}': {sorted(sobrantes)}",
+        )
+        clases.append(
+            DocumentClass(
+                nombre=str(nombre),
+                rutas=tuple(str(r) for r in (cuerpo.get("rutas") or [])),
+                tipos=tuple(str(t) for t in (cuerpo.get("tipos") or [])),
+                marcadores=tuple(str(m) for m in (cuerpo.get("marcadores") or [])),
+            )
+        )
+
+    expone = datos.get("expone") or []
+    _exigir(isinstance(expone, list), f"{origen}: 'documentos.expone' debe ser una lista de clases")
+
+    try:
+        return DocumentPolicy(
+            expone=tuple(str(c) for c in expone),
+            por_defecto=str(datos.get("por_defecto") or "interno"),
+            clases=tuple(clases),
+        )
+    except ValueError as exc:
+        raise ProfileError(f"{origen}: documentos: {exc}") from exc
+
+
 def parse_profile(datos: dict[str, Any], *, origen: str = "<memoria>") -> ProfileBinding:
     _exigir(isinstance(datos, dict), f"{origen}: el perfil debe ser un mapa YAML")
     sobrantes = set(datos) - _CLAVES
@@ -80,6 +135,7 @@ def parse_profile(datos: dict[str, Any], *, origen: str = "<memoria>") -> Profil
          "repeticion_lineas_borde"}, origen,
     )
     corpus = _tramo(datos, "corpus", _CLAVES_CORPUS, origen)
+    documentos = _documentos(_tramo(datos, "documentos", _CLAVES_DOCUMENTOS, origen), origen)
 
     redaction = datos.get("redaction") or []
     _exigir(isinstance(redaction, list), f"{origen}: 'redaction' debe ser una lista de patrones")
@@ -101,6 +157,7 @@ def parse_profile(datos: dict[str, Any], *, origen: str = "<memoria>") -> Profil
             cleanup=CleanupPolicy(**cleanup),
             path_metadata=tuple(str(p) for p in (datos.get("path_metadata") or [])),
             banned_markers=tuple(str(m) for m in (datos.get("banned_markers") or [])),
+            documents=documentos,
         )
     except (ValueError, TypeError) as exc:
         raise ProfileError(f"{origen}: {exc}") from exc

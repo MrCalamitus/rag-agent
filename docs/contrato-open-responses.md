@@ -79,14 +79,19 @@ documentación hay indexada, y eso ya es información.
 
 ```json
 {
-  "default": "coches",
+  "default": "autos",
   "data": [
-    { "id": "coches", "name": "Marcas y modelos de coches",
+    { "id": "autos", "name": "Marcas y modelos de coches",
       "subject": "los vehículos, versiones y especificaciones…",
-      "masks_identifiers": false }
+      "masks_identifiers": false,
+      "exposes_documents": true }
   ]
 }
 ```
+
+`exposes_documents` dice si el tema publica alguno de sus documentos originales.
+Existe para que un cliente sepa si tiene sentido ofrecerlos sin tener que pedir
+uno y ver si falla.
 
 ### Cabeceras de respuesta
 
@@ -244,12 +249,35 @@ recibo verificable de qué se recuperó y con qué consulta:
       "document_id": "s3://…/cedula-profesional.pdf",
       "chunk": "…",
       "score": 0.87,
-      "metadata": { "tipo": "documento_oficial", "anio": 2021 }
+      "metadata": { "tipo": "documento_oficial", "anio": 2021, "clase": "identidad" },
+      "exposed": false
     }
   ],
   "latency_ms": 340
 }
 ```
+
+**`exposed` (extensión).** Si el tema deja consultar el documento original de
+ese fragmento. Lo decide el servidor cruzando la `clase` que la ingesta estampó
+—una propiedad del documento— con la lista `documentos.expone` del perfil —una
+política del tema—. El reparto es deliberado: reclasificar exige reingesta,
+cambiar de política no cuesta nada, y ninguna de las dos cosas debería obligar a
+la otra.
+
+El campo viaja resuelto y no como dos metadatos que el cliente tenga que
+combinar: un cliente no debe necesitar conocer la política de un tema para saber
+si puede ofrecer un archivo, y dos clientes no deben poder discrepar sobre la
+misma respuesta.
+
+Por defecto un perfil **no expone nada**, y un fragmento sin `clase` —un corpus
+preparado antes de que esto existiera— tampoco. Es lo contrario al criterio de
+`redaction`, que por defecto no enmascara, y la asimetría es intencional:
+equivocarse allí tapa un dato, equivocarse aquí publica un archivo.
+
+Que un fragmento no esté expuesto **no lo excluye de `results`**. Sigue con su
+`document_id`, su `score` y su `chunk`: el recibo de qué sustentó la respuesta es
+justo lo que hace auditable al agente, y recortarlo por no poder entregar el PDF
+sería pagar el argumento entero por una parte.
 
 Todo ítem MUST llevar `id`, `type` y `status`. Los tipos de extensión MUST
 llevar el prefijo del slug del implementador.

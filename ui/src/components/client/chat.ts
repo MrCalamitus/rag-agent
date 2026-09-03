@@ -8,7 +8,12 @@
  */
 
 import { readSse } from "../../lib/sse";
-import { KNOWLEDGE_SEARCH, type KnowledgeSearchItem, type RetrievalResult, type Turn } from "../../lib/types";
+import {
+  KNOWLEDGE_SEARCH,
+  type KnowledgeSearchItem,
+  type RetrievalResult,
+  type Turn,
+} from "../../lib/types";
 
 const CONSULTA_EN_CURSO = "El agente está consultando los documentos.";
 
@@ -25,6 +30,11 @@ interface Elements {
 export function initChat(root: ParentNode): void {
   const found = collect(root);
   if (!found) return;
+  // Si el tema publica alguno de sus documentos. Viene del perfil, vía el
+  // servidor: la UI no conoce la política, solo si tiene sentido explicar por
+  // qué falta un archivo concreto.
+  const exposesDocuments =
+    root.querySelector<HTMLElement>("[data-chat]")?.dataset.exposes === "1";
   // Un alias no nulo: el resto son cierres, y ahí el estrechamiento del `if` ya
   // no llega.
   const el: Elements = found;
@@ -107,7 +117,7 @@ export function initChat(root: ParentNode): void {
           case "response.output_item.done":
             if (data.item?.type === KNOWLEDGE_SEARCH) {
               turn.pending(false);
-              turn.showSources(data.item as KnowledgeSearchItem);
+              turn.showSources(data.item as KnowledgeSearchItem, exposesDocuments);
             }
             break;
 
@@ -168,7 +178,7 @@ export function initChat(root: ParentNode): void {
 interface AgentTurn {
   setText(value: string): void;
   pending(active: boolean): void;
-  showSources(item: KnowledgeSearchItem): void;
+  showSources(item: KnowledgeSearchItem, exposesDocuments: boolean): void;
   fail(message: string, requestId?: string): void;
   warn(message: string): void;
   finish(text: string): void;
@@ -205,8 +215,8 @@ function appendAgentTurn(thread: HTMLElement): AgentTurn {
       status.hidden = !active;
       if (active) scrollToEnd();
     },
-    showSources(item) {
-      const panel = renderSources(item);
+    showSources(item, exposesDocuments) {
+      const panel = renderSources(item, exposesDocuments);
       if (panel) {
         sources.replaceChildren(panel);
         scrollToEnd();
@@ -244,43 +254,135 @@ function appendAgentTurn(thread: HTMLElement): AgentTurn {
   };
 }
 
+/**
+ * Metadatos que no se enseñan: o son del fragmento y no del documento
+ * (`fragmento`, `fragmentos_totales`), o ya se muestran en otro sitio
+ * (`fuente`), o son maquinaria interna que al usuario no le dice nada
+ * (`clase`, `contiene_pii`, `origen_texto`).
+ */
+const META_OCULTA = new Set([
+  "fuente",
+  "clase",
+  "fragmento",
+  "fragmentos_totales",
+  "contiene_pii",
+  "origen_texto",
+]);
+
+interface Documento {
+  nombre: string;
+  ruta: string;
+  score: number;
+  expuesto: boolean;
+  metadata: Record<string, unknown>;
+  fragmentos: string[];
+}
+
+/**
+ * Agrupa los fragmentos por documento de origen.
+ *
+ * El nombre sale de `metadata.fuente` —el PDF real— y solo cae al
+ * `document_id` cuando la ingesta no dejó esa metadata. Un documento se
+ * considera consultable si TODOS sus fragmentos lo son: si uno solo no lo es,
+ * el archivo no se ofrece.
+ */
+function agrupar(results: RetrievalResult[]): Documento[] {
+  const porDocumento = new Map<string, Documento>();
+
+  for (const result of results) {
+    const metadata = result.metadata ?? {};
+    const fuente = typeof metadata.fuente === "string" ? metadata.fuente : "";
+    const ruta = fuente || result.document_id;
+    const previo = porDocumento.get(ruta);
+
+    if (previo) {
+      previo.score = Math.max(previo.score, result.score ?? 0);
+      previo.expuesto &&= result.exposed === true;
+      previo.fragmentos.push(result.chunk ?? "");
+      continue;
+    }
+
+    porDocumento.set(ruta, {
+      nombre: basename(ruta),
+      ruta,
+      score: result.score ?? 0,
+      expuesto: result.exposed === true,
+      metadata,
+      fragmentos: [result.chunk ?? ""],
+    });
+  }
+
+  return [...porDocumento.values()].sort((a, b) => b.score - a.score);
+}
+
 /** El panel de evidencia. `null` si no hubo nada que recuperar. */
-function renderSources(item: KnowledgeSearchItem): DocumentFragment | null {
+function renderSources(item: KnowledgeSearchItem, exposesDocuments: boolean): DocumentFragment | null {
   const results = Array.isArray(item.results) ? item.results : [];
   if (results.length === 0) return null;
 
+  const documentos = agrupar(results);
   const node = clone("tpl-sources");
-  const plural = results.length === 1 ? "fragmento" : "fragmentos";
+  const docs = `${documentos.length} ${documentos.length === 1 ? "documento" : "documentos"}`;
+  const trozos = `${results.length} ${results.length === 1 ? "fragmento" : "fragmentos"}`;
   const latency = typeof item.latency_ms === "number" ? ` · ${Math.round(item.latency_ms)} ms` : "";
-  select(node, "[data-summary]").textContent = `${results.length} ${plural} consultados${latency}`;
+  select(node, "[data-summary]").textContent = `${docs} · ${trozos}${latency}`;
 
   const list = select(node, "[data-list]");
-  for (const result of results) list.append(renderSource(result));
+  for (const documento of documentos) list.append(renderSource(documento, exposesDocuments));
   return node;
 }
 
-function renderSource(result: RetrievalResult): DocumentFragment {
+function renderSource(documento: Documento, exposesDocuments: boolean): DocumentFragment {
   const node = clone("tpl-source");
   const name = select(node, "[data-name]");
-  // El nombre del archivo basta para reconocerlo; la ruta completa —que puede
-  // ser una URI de S3 larguísima— se guarda en el title.
-  name.textContent = basename(result.document_id);
-  name.title = result.document_id;
-
-  if (typeof result.score === "number") {
-    select(node, "[data-score]").textContent = result.score.toFixed(3);
-  }
+  name.textContent = documento.nombre;
+  // La ruta completa —que puede ser una URI de S3 larguísima— en el title.
+  name.title = documento.ruta;
+  select(node, "[data-score]").textContent = documento.score.toFixed(3);
 
   const meta = select(node, "[data-meta]");
-  const pairs = Object.entries(result.metadata ?? {})
-    .filter(([, value]) => value !== null && value !== undefined && value !== "")
-    .map(([key, value]) => `${key}: ${value}`);
-  if (pairs.length > 0) {
-    meta.textContent = pairs.join(" · ");
-    meta.hidden = false;
+  const pares = Object.entries(documento.metadata)
+    .filter(([clave, valor]) => !META_OCULTA.has(clave) && valor !== null && valor !== undefined && valor !== "")
+    .map(([clave, valor]) => `${clave}: ${valor}`);
+  const total = documento.fragmentos.length;
+  pares.push(`${total} ${total === 1 ? "fragmento" : "fragmentos"}`);
+  meta.textContent = pares.join(" · ");
+  meta.hidden = false;
+
+  // Decir "no divulgable" en un tema que no divulga ninguno sería repetir en
+  // cada documento lo que la cabecera ya dice una vez.
+  if (exposesDocuments && !documento.expuesto) {
+    select(node, "[data-sealed]").hidden = false;
   }
 
-  select(node, "[data-chunk]").textContent = result.chunk ?? "";
+  const fragmentos = select(node, "[data-fragments]");
+  for (const texto of documento.fragmentos) fragmentos.append(renderFragment(texto));
+  return node;
+}
+
+/**
+ * Un fragmento con su botón de copiar.
+ *
+ * Copiar la cita es hoy la forma de encontrarla: la metadata guarda el total de
+ * páginas del documento, no la página de la que salió este trozo, así que no se
+ * puede decir "página 3". Pegar la frase en el buscador del visor sí lleva al
+ * sitio exacto.
+ */
+function renderFragment(texto: string): DocumentFragment {
+  const node = clone("tpl-fragment");
+  select(node, "[data-chunk]").textContent = texto;
+
+  const boton = select<HTMLButtonElement>(node, "[data-quote]");
+  const label = select(node, "[data-quote-label]");
+  boton.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(texto);
+      label.textContent = "Copiada";
+      setTimeout(() => (label.textContent = "Copiar cita"), 1600);
+    } catch {
+      label.textContent = "No se pudo copiar";
+    }
+  });
   return node;
 }
 

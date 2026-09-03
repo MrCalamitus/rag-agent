@@ -105,6 +105,7 @@ def _router() -> APIRouter:
                         "name": binding.profile.name,
                         "subject": binding.profile.subject,
                         "masks_identifiers": binding.profile.masks_identifiers,
+                        "exposes_documents": binding.profile.exposes_documents,
                     }
                     for binding in registro.bindings()
                 ],

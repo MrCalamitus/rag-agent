@@ -26,7 +26,7 @@ from ..domain.profile import Profile
 from ..domain.prompts import build_system_prompt
 from ..domain.query_planning import plan_queries
 from ..domain.redaction import StreamingRedactor, fingerprint
-from ..domain.retrieval import RetrievalOutcome
+from ..domain.retrieval import RetrievalOutcome, aplicar_exposicion
 from .commands import CreateResponseCommand
 from .ports import (
     ClockPort,
@@ -232,6 +232,11 @@ class CreateResponse:
             documents=len(outcome.documents()),
             latency_ms=outcome.latency_ms or elapsed,
         )
+        # La política del tema decide qué documentos puede consultar el usuario.
+        # Se aplica aquí, sobre la clase que la ingesta estampó, y no en el
+        # adaptador HTTP: si viviera allí, cada transporte nuevo tendría que
+        # reimplementarla y alguno se olvidaría.
+        outcome = aplicar_exposicion(outcome, profile.documents)
         if outcome.latency_ms:
             return outcome
         return RetrievalOutcome(queries=outcome.queries, chunks=outcome.chunks, latency_ms=elapsed)
@@ -247,4 +252,7 @@ def _is_grounded(answer: str, outcome: RetrievalOutcome, profile: Profile) -> bo
         return True
     if outcome.is_empty:
         return False
-    return any(f"[{doc}]" in answer for doc in outcome.documents())
+    # Sobre `citations()` y no sobre `documents()`: es lo que el prompt pide
+    # citar. Comprobarlo contra los nombres internos daría por no fundamentada
+    # una respuesta que cita el PDF correctamente.
+    return any(f"[{doc}]" in answer for doc in outcome.citations())

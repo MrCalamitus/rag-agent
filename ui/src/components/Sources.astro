@@ -1,14 +1,16 @@
 ---
 /**
- * El panel de evidencia: los fragmentos que sustentaron la respuesta.
+ * El panel de evidencia: los documentos que sustentaron la respuesta.
  *
- * Existe porque el contrato emite la recuperación como un ítem de salida y no
- * como un paso invisible del servidor. Enseñarlo es lo que convierte "confía en
- * mí" en "míralo tú": cualquier respuesta se puede auditar sin abrir un log.
+ * Se agrupa por documento y no por fragmento. Seis fragmentos suelen ser dos
+ * PDF, y seis tarjetas casi idénticas esconden esa relación justo cuando lo que
+ * el usuario quiere saber es *qué archivo abrir*.
  *
- * Este componente es la plantilla que el cliente clona; el marcado equivalente
- * vive en `client/chat.ts`, y los dos deben cambiar juntos.
+ * Y se nombra el documento ORIGINAL —`metadata.fuente`, el PDF— no el
+ * `document_id`, que es el nombre interno del trozo de markdown que produjo la
+ * ingesta. `ficha-tecnica-hilux--001.md` no existe para nadie fuera del corpus.
  *
+ * Estas plantillas son las que clona `client/chat.ts`; las dos cambian juntas.
  * `<details>` nativo a propósito: plegado accesible, con teclado y sin JS.
  */
 import Icon from "./Icon.astro";
@@ -32,6 +34,25 @@ import Icon from "./Icon.astro";
       <span class="source__score" data-score></span>
     </div>
     <div class="source__meta" data-meta hidden></div>
-    <div class="source__chunk" data-chunk></div>
+
+    <!-- Solo aparece cuando el tema publica algunos documentos y este no es uno
+         de ellos. Si el tema no publica ninguno, repetirlo en cada documento es
+         ruido: ya lo dice la cabecera de la página. -->
+    <p class="source__sealed" data-sealed hidden>
+      <Icon name="lock" size={14} />
+      <span>Documento no divulgable: la cita se puede verificar, el archivo no se entrega.</span>
+    </p>
+
+    <div class="source__fragments" data-fragments></div>
+  </div>
+</template>
+
+<template id="tpl-fragment">
+  <div class="fragment">
+    <div class="fragment__text" data-chunk></div>
+    <button type="button" class="icon-button icon-button--quiet" data-quote>
+      <Icon name="content_copy" size={14} />
+      <span data-quote-label>Copiar cita</span>
+    </button>
   </div>
 </template>

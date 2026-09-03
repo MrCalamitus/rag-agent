@@ -114,6 +114,24 @@ src/
   styles/               tokens.css (la marca) y global.css
 ```
 
+## El panel de fuentes
+
+Agrupa por documento y nombra el PDF real (`metadata.fuente`), no el
+`document_id` —que es el nombre interno del trozo de markdown que produjo la
+ingesta y no existe para nadie fuera del corpus—. Cada fragmento trae un botón de
+copiar la cita: la metadata guarda el total de páginas del documento, no la
+página del fragmento, así que pegar la frase en el buscador del visor es hoy la
+forma de llegar al sitio exacto.
+
+Cada resultado llega con `exposed`, que dice si el tema deja consultar el
+documento original. Un documento no expuesto no se oculta: se ve su nombre, su
+score y su texto, y solo se añade una nota de que el archivo no se entrega —y
+únicamente en temas que sí publican algunos, porque en uno que no publica ninguno
+sería ruido repetido en cada tarjeta. La política vive en el `documentos:` del
+perfil, en el servicio; aquí solo se lee el veredicto.
+
+## Iconos
+
 Los iconos son **Material Symbols Rounded** servidos desde el propio origen —el
 paquete npm, no el `<link>` a Google— para no depender de un tercero y funcionar
 sin red. Van con `aria-hidden` y `translate="no"`: el glifo se dibuja desde un

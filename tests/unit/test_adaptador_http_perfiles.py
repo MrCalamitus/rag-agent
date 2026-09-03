@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from rag_agent.domain.profile import Profile
+from rag_agent.domain.profile import DocumentPolicy, Profile
 from rag_agent.infrastructure.container import build_container
 from rag_agent.infrastructure.outbound.knowledge_bases import registry_from_mapping
 from rag_agent.infrastructure.profiles import ProfileBinding, StaticProfileRegistry
@@ -149,3 +149,109 @@ def test_la_telemetria_registra_el_tema_de_cada_peticion(contenedor_multitema, a
 
     aceptadas = [e for e in telemetry.events if e[0] == "request.accepted"]
     assert aceptadas and aceptadas[-1][1]["profile"] == "inversiones"
+
+
+# --- exposición de documentos -------------------------------------------------
+
+
+@pytest.fixture
+def contenedor_exposicion(settings, telemetry):
+    """El mismo fragmento, dos temas con posturas opuestas sobre publicarlo."""
+    fragmento = Chunk(
+        "folleto--001.md",
+        "El motor 2.8 diésel entrega 204 CV.",
+        0.9,
+        {"clase": "publico", "fuente": "folleto.pdf"},
+    )
+    abierto = Profile(
+        slug="abierto",
+        name="Abierto",
+        subject="folletos publicados",
+        documents=DocumentPolicy(expone=("publico",), por_defecto="publico"),
+    )
+    cerrado = Profile(
+        slug="cerrado",
+        name="Cerrado",
+        subject="credenciales",
+        documents=DocumentPolicy(por_defecto="identidad"),
+    )
+    return build_container(
+        settings,
+        profiles=StaticProfileRegistry(
+            {
+                "abierto": ProfileBinding(profile=abierto),
+                "cerrado": ProfileBinding(profile=cerrado),
+            },
+            default_slug="abierto",
+        ),
+        knowledge_bases=registry_from_mapping(
+            {
+                "abierto": StubKnowledgeBase(chunks=(fragmento,)),
+                "cerrado": StubKnowledgeBase(chunks=(fragmento,)),
+            }
+        ),
+        clock=FrozenClock(),
+        ids=SequentialIds(),
+        telemetry=telemetry,
+    )
+
+
+def _fragmentos(respuesta):
+    recuperacion = [i for i in respuesta.json()["output"] if i["type"] != "message"]
+    return recuperacion[0]["results"] if recuperacion else []
+
+
+def test_el_perfil_decide_si_el_documento_se_puede_consultar(contenedor_exposicion, auth):
+    """El mismo fragmento, la misma clase, dos respuestas distintas: la política
+    es del tema, no del documento."""
+    cliente = build_client(contenedor_exposicion)
+
+    abierto = _fragmentos(_preguntar(cliente, auth, "¿Qué motor monta?", tema="abierto"))
+    cerrado = _fragmentos(_preguntar(cliente, auth, "¿Qué motor monta?", tema="cerrado"))
+
+    assert abierto[0]["exposed"] is True
+    assert cerrado[0]["exposed"] is False
+
+
+def test_un_fragmento_no_expuesto_sigue_siendo_evidencia(contenedor_exposicion, auth):
+    """No dar el archivo no es esconder la cita: el recibo de qué sustentó la
+    respuesta es justo lo que hace auditable al agente."""
+    resultados = _fragmentos(
+        _preguntar(build_client(contenedor_exposicion), auth, "¿Qué motor monta?", tema="cerrado")
+    )
+
+    assert len(resultados) == 1
+    assert resultados[0]["chunk"] == "El motor 2.8 diésel entrega 204 CV."
+    assert resultados[0]["metadata"]["fuente"] == "folleto.pdf"
+
+
+def test_el_endpoint_de_temas_publica_la_postura(contenedor_exposicion, auth):
+    """Para que un cliente sepa si ofrecer documentos sin tener que pedir uno
+    y ver si existe."""
+    cuerpo = build_client(contenedor_exposicion).get("/v1/profiles", headers=auth).json()
+
+    por_id = {t["id"]: t for t in cuerpo["data"]}
+    assert por_id["abierto"]["exposes_documents"] is True
+    assert por_id["cerrado"]["exposes_documents"] is False
+
+
+def test_la_respuesta_cita_el_pdf_y_no_el_trozo_de_markdown(contenedor_exposicion, auth, telemetry):
+    """La cita tiene que servirle al lector para abrir algo.
+
+    El modelo solo ve lo que el prompt le pone entre corchetes, así que basta
+    con cambiar el encabezado del fragmento — pero el chequeo de fundamentación
+    tiene que mirar el mismo nombre, o daría por no citada una respuesta que
+    cita el PDF correctamente.
+    """
+    respuesta = _preguntar(
+        build_client(contenedor_exposicion),
+        auth,
+        "¿Qué entrega el motor diésel?",
+        tema="abierto",
+    )
+
+    texto = next(i for i in respuesta.json()["output"] if i["type"] == "message")
+    contenido = texto["content"][0]["text"]
+    assert "[folleto.pdf]" in contenido
+    assert "folleto--001.md" not in contenido
+    assert telemetry.find("response.completed")["grounded"] is True

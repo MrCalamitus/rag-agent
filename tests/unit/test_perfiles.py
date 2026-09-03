@@ -233,3 +233,100 @@ def test_las_rutas_del_perfil_expanden_la_virgulilla():
     kb = build_knowledge_bases(ajustes, perfiles).for_profile(perfiles.default)
 
     assert "~" not in str(kb._dir)
+
+
+# --- exposición de documentos -------------------------------------------------
+#
+# La política está partida en dos porque las dos mitades cuestan distinto de
+# cambiar: clasificar es de la ingesta (reclasificar exige reingesta) y exponer
+# es del perfil (cambiar de opinión es gratis). Estas pruebas fijan esa frontera.
+
+
+def test_sin_bloque_documentos_no_se_expone_nada():
+    """El defecto seguro: un perfil que nadie configuró no publica archivos."""
+    perfil = parse_profile(MINIMO).profile
+
+    assert perfil.documents.expone == ()
+    assert not perfil.exposes_documents
+    assert not perfil.documents.expuesta("publico")
+
+
+def test_expone_una_clase_declarada():
+    perfil = parse_profile(
+        {**MINIMO, "documentos": {"por_defecto": "publico", "expone": ["publico"]}}
+    ).profile
+
+    assert perfil.exposes_documents
+    assert perfil.documents.expuesta("publico")
+    assert not perfil.documents.expuesta("identidad")
+
+
+def test_expone_una_clase_que_no_existe_es_un_error():
+    """Un nombre mal escrito no expondría nada y no diría por qué."""
+    with pytest.raises(ProfileError) as fallo:
+        parse_profile({**MINIMO, "documentos": {"expone": ["publicoo"]}})
+
+    assert "publicoo" in str(fallo.value)
+
+
+def test_clave_desconocida_dentro_de_una_clase_es_un_error():
+    with pytest.raises(ProfileError):
+        parse_profile(
+            {**MINIMO, "documentos": {"clases": {"publico": {"rutasss": ["a/**"]}}}}
+        )
+
+
+def test_el_marcador_gana_a_la_ruta_y_la_ruta_al_tipo():
+    """El contenido no se puede cambiar renombrando; el nombre sí."""
+    perfil = parse_profile(
+        {
+            **MINIMO,
+            "documentos": {
+                "por_defecto": "interno",
+                "expone": ["publico"],
+                "clases": {
+                    "publico": {"rutas": ["folletos/**"], "tipos": ["cv"]},
+                    "identidad": {"marcadores": ["CÉDULA PROFESIONAL"]},
+                },
+            },
+        }
+    ).profile
+    politica = perfil.documents
+
+    assert politica.clasificar(ruta="folletos/hilux.pdf") == "publico"
+    assert politica.clasificar(tipo="cv") == "publico"
+    # Está en la carpeta pública y su nombre dice «cv», pero lleva dentro una
+    # cédula: gana el contenido.
+    assert (
+        politica.clasificar(ruta="folletos/cv.pdf", tipo="cv", texto="… CÉDULA PROFESIONAL 123 …")
+        == "identidad"
+    )
+    # Nada acierta → la clase por defecto, que no está expuesta.
+    assert politica.clasificar(ruta="otros/x.pdf") == "interno"
+    assert not politica.expuesta("interno")
+
+
+def test_un_fragmento_sin_clase_no_se_expone():
+    """La propiedad que hace segura la migración.
+
+    Un corpus preparado antes de que existiera `documentos:` no lleva `clase` en
+    su metadata. Ese fragmento llega con `None`, y `None` no está en ninguna
+    lista de expuestas: el corpus viejo no publica nada hasta que alguien lo
+    vuelva a preparar. Lo contrario —tratar la ausencia como permiso— habría
+    publicado archivos con solo desplegar.
+    """
+    politica = parse_profile(
+        {**MINIMO, "documentos": {"por_defecto": "publico", "expone": ["publico"]}}
+    ).profile.documents
+
+    assert not politica.expuesta(None)
+    assert not politica.expuesta("")
+
+
+def test_los_perfiles_del_repositorio_declaran_su_postura():
+    """`autos` es material publicado; `luis-cv` son credenciales."""
+    perfiles = load_profiles("profiles")
+
+    assert perfiles["autos"].profile.exposes_documents
+    assert perfiles["autos"].profile.documents.clasificar(ruta="toyota/hilux.pdf") == "publico"
+    assert not perfiles["luis-cv"].profile.exposes_documents

@@ -240,6 +240,18 @@ def escanear_ocr(origen: Path, profile: Profile, carpeta_cache: Path) -> list[Ca
     return candidatos
 
 
+def _ruta_relativa(archivo: Path, origen: Path) -> str:
+    """Ruta con la que se comparan los patrones `rutas` de una clase.
+
+    Siempre con `/`, para que un patrón escrito en el YAML signifique lo mismo
+    en macOS y en el contenedor Linux donde corre la ingesta de verdad.
+    """
+    try:
+        return archivo.relative_to(origen).as_posix()
+    except ValueError:
+        return archivo.name
+
+
 def _fragmentar(documento: Documento, profile: Profile, extra: dict) -> Iterator[Fragmento]:
     stem = documento.nombre.removesuffix(".md")
     trozos = split(documento.texto, profile.chunking)
@@ -323,6 +335,16 @@ def preparar(
 
         reporte.documentos += 1
         extra = metadata_de_ruta(archivo, origen, profile.path_metadata)
+        # La clase se decide aquí, con el documento entero delante, y viaja con
+        # cada fragmento. Al responder ya no hay forma de saber si un texto
+        # suelto venía de un folleto o de una cédula: la ruta se perdió y el
+        # documento original no está. Clasificar es de la ingesta; decidir si se
+        # expone, del perfil, y eso se evalúa al servir.
+        extra["clase"] = profile.documents.clasificar(
+            ruta=_ruta_relativa(archivo, origen),
+            tipo=str(documento.metadata.get("tipo", "")),
+            texto=documento.texto,
+        )
         reporte.fragmentos.extend(_fragmentar(documento, profile, extra))
 
     return reporte

@@ -85,8 +85,10 @@ Eres un agente que responde preguntas sobre {subject} apoyándote únicamente en
 _REGLAS_BASE = (
     "Responde SOLO con lo que aparezca en los FRAGMENTOS. No completes con\n"
     "   conocimiento general ni con suposiciones razonables.",
-    "Toda afirmación factual debe citar entre corchetes el `document_id` que la\n"
-    "   sustenta.",
+    "Toda afirmación factual debe citar entre corchetes el nombre del documento\n"
+    "   que la sustenta, copiado EXACTAMENTE como aparece entre corchetes al\n"
+    "   principio de su fragmento. No lo abrevies, no le quites la extensión y no\n"
+    "   inventes uno que no esté ahí.",
     'Si los fragmentos no bastan para responder, responde exactamente:\n'
     '   "{decline}" y no ofrezcas alternativas inventadas.',
     "Si te preguntan por algo que no aparece en los fragmentos, niégalo de forma\n"
@@ -127,8 +129,12 @@ def render_context(chunks: tuple[Chunk, ...] | list[Chunk]) -> str:
         return NO_EVIDENCE_BLOCK
     bloques = []
     for chunk in chunks:
-        meta = ", ".join(f"{k}={v}" for k, v in sorted(chunk.metadata.items()))
-        encabezado = f"[{chunk.document_id}]" + (f" ({meta})" if meta else "")
+        # `fuente` no se repite entre los metadatos: ya es el encabezado, y
+        # verlo dos veces invita al modelo a citar `fuente=hilux.pdf`.
+        meta = ", ".join(
+            f"{k}={v}" for k, v in sorted(chunk.metadata.items()) if k != "fuente"
+        )
+        encabezado = f"[{chunk.citation}]" + (f" ({meta})" if meta else "")
         bloques.append(f"{encabezado}\n{chunk.text.strip()}")
     return "FRAGMENTOS:\n\n" + "\n\n---\n\n".join(bloques) + "\n"
 

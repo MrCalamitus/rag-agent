@@ -14,6 +14,7 @@ agente y con qué reglas*, no *de dónde saca los bytes*.
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+from fnmatch import fnmatch
 
 from .redaction import RedactionPolicy
 
@@ -167,6 +168,100 @@ class OcrPolicy:
 
 
 @dataclass(frozen=True)
+class DocumentClass:
+    """Una clase de documento y las señales por las que se reconoce.
+
+    Las tres señales no son intercambiables y por eso se aplican en un orden
+    fijo —marcador, ruta, tipo—: el contenido de un documento no se puede
+    cambiar renombrándolo, la carpeta es una decisión explícita de quien
+    organizó el corpus, y el tipo se infiere del nombre del archivo, que es la
+    señal más barata y la más fácil de equivocar.
+    """
+
+    nombre: str
+    # Patrones glob contra la ruta relativa al origen: `toyota/**`, `*.pdf`.
+    rutas: tuple[str, ...] = ()
+    # Valores de `tipo`, el que infiere `documents.clasificar` del nombre.
+    tipos: tuple[str, ...] = ()
+    # Texto que, si aparece en el documento, lo mete en esta clase pase lo que
+    # pase. Es la red de seguridad: un título escaneado que alguien dejó en la
+    # carpeta equivocada sigue siendo un título.
+    marcadores: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.nombre:
+            raise ValueError("una clase de documento necesita nombre")
+
+
+@dataclass(frozen=True)
+class DocumentPolicy:
+    """Qué documentos del corpus pueden llegar al usuario y cuáles no.
+
+    Está partida en dos a propósito, porque las dos mitades tienen costes muy
+    distintos de cambiar. **Clasificar** es una propiedad del documento y se
+    estampa en la ingesta: reclasificar exige volver a preparar el corpus.
+    **Exponer** es política del tema y se evalúa al responder: cambiar de
+    opinión es gratis y no toca un solo byte del corpus.
+
+    Si la exposición se hubiera resuelto entera en la ingesta, cualquier cambio
+    de criterio obligaría a reingestar; si se hubiera resuelto entera al
+    servir, habría que releer los documentos en cada respuesta para saber qué
+    son. El reparto evita las dos cosas.
+
+    Por defecto **no expone nada**. Es lo contrario a `RedactionPolicy`, que por
+    defecto no enmascara, y la asimetría está justificada: allí equivocarse tapa
+    un dato, aquí publica un archivo. Un documento que nadie clasificó, o un
+    perfil que nadie configuró, no deben filtrar nada por omisión.
+    """
+
+    # Clases que este tema deja llegar al usuario. Vacío = ninguna.
+    expone: tuple[str, ...] = ()
+    # Clase que se asigna cuando ninguna regla acierta.
+    por_defecto: str = "interno"
+    clases: tuple[DocumentClass, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.por_defecto:
+            raise ValueError("'por_defecto' no puede estar vacío")
+        nombres = [c.nombre for c in self.clases]
+        repetidas = {n for n in nombres if nombres.count(n) > 1}
+        if repetidas:
+            raise ValueError(f"clases de documento repetidas: {sorted(repetidas)}")
+        # Un nombre mal escrito en `expone` no expondría nada y no avisaría de
+        # nada. Peor aún: si el error fuera al revés —escribir bien la clase que
+        # NO se quería exponer— el silencio publicaría archivos.
+        conocidas = set(nombres) | {self.por_defecto}
+        desconocidas = [c for c in self.expone if c not in conocidas]
+        if desconocidas:
+            raise ValueError(
+                f"'expone' nombra clases que no existen: {sorted(desconocidas)}. "
+                f"Declaradas: {sorted(conocidas)}"
+            )
+
+    def clasificar(self, *, ruta: str = "", tipo: str = "", texto: str = "") -> str:
+        """La clase de un documento, según sus señales. Nunca devuelve vacío."""
+        plano = texto.upper()
+        for clase in self.clases:
+            if any(m.upper() in plano for m in clase.marcadores):
+                return clase.nombre
+        for clase in self.clases:
+            if any(fnmatch(ruta, patron) for patron in clase.rutas):
+                return clase.nombre
+        for clase in self.clases:
+            if tipo and tipo in clase.tipos:
+                return clase.nombre
+        return self.por_defecto
+
+    def expuesta(self, clase: object) -> bool:
+        """¿Puede el usuario consultar el documento original de esta clase?"""
+        return isinstance(clase, str) and clase in self.expone
+
+    @property
+    def expone_algo(self) -> bool:
+        return bool(self.expone)
+
+
+@dataclass(frozen=True)
 class RetrievalPolicy:
     """Cuánta evidencia se recupera y con qué piso de relevancia."""
 
@@ -211,6 +306,10 @@ class Profile:
     # CV son documentos de identidad; en otros temas puede ser material
     # confidencial de cliente. Vacío = sin veto.
     banned_markers: tuple[str, ...] = ()
+    # Qué documentos de este corpus puede llegar a consultar el usuario. Por
+    # defecto ninguno: exponer un archivo es una decisión que alguien tiene que
+    # escribir, no algo que se herede por olvido.
+    documents: DocumentPolicy = field(default_factory=DocumentPolicy)
 
     def __post_init__(self) -> None:
         if not self.slug:
@@ -221,6 +320,10 @@ class Profile:
     @property
     def masks_identifiers(self) -> bool:
         return self.redaction.enabled
+
+    @property
+    def exposes_documents(self) -> bool:
+        return self.documents.expone_algo
 
     def con(self, **cambios: object) -> Profile:
         """Copia con cambios: para pruebas y para sobrescrituras por entorno."""

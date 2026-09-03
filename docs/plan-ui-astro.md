@@ -327,3 +327,108 @@ son fixtures inventados y se quedan como están.
   se decida esta carpeta no obliga a nada.
 - **Sin autenticación propia ni límite de tasa por visitante.** Ambos riesgos siguen
   escritos abajo tal cual; la UI es hoy apta para una demo, no para tráfico abierto.
+
+
+---
+
+## Exposición de documentos por perfil
+
+Añadido después de la primera entrega, para responder a *«¿dónde puede el usuario
+buscar lo que el agente está contestando?»*.
+
+### El obstáculo
+
+Los PDF originales no están en ningún sitio alcanzable, y no por descuido:
+`scripts/sync-kb.sh:8` sube **solo** el corpus preparado, *"nunca la de documentos
+originales: lo que entra a S3 es lo que el agente puede llegar a recitar"*. Lo
+que sí viaja con cada fragmento es `fuente` —el nombre del PDF—, `paginas` —el
+total del documento, no la página del fragmento— y `fragmento X de N`.
+
+### El reparto: clasificar en la ingesta, decidir al servir
+
+Las dos mitades cuestan muy distinto de cambiar, así que viven en sitios
+distintos:
+
+- **La ingesta estampa una clase**, no un permiso. `pipeline.preparar` la calcula
+  con el documento entero delante y la escribe en el sidecar como `clase`. Es una
+  propiedad del documento; reclasificar exige reingesta.
+- **El perfil declara la política**: `documentos.expone`. Se evalúa al responder,
+  en `create_response._retrieve` vía `retrieval.aplicar_exposicion`. Cambiar de
+  opinión no toca un solo byte del corpus.
+
+Si todo se hubiera resuelto en la ingesta, cada cambio de criterio obligaría a
+reingestar; si todo se hubiera resuelto al servir, habría que releer los
+documentos en cada respuesta para saber qué son.
+
+### La clase se deduce de tres señales, en orden
+
+`marcadores` → `rutas` → `tipos` → `por_defecto`. El orden no es arbitrario: el
+contenido de un documento no se puede cambiar renombrándolo, la carpeta es una
+decisión explícita de quien organizó el corpus, y el tipo se infiere del nombre
+del archivo, que es la señal más barata y la más fácil de equivocar. Un CV que
+lleve dentro una CURP cae en `identidad` aunque su nombre y su carpeta digan otra
+cosa, que es la respuesta correcta.
+
+### Cerrado por defecto
+
+Un perfil sin bloque `documentos:` no expone nada, y un fragmento sin `clase`
+—un corpus preparado antes de que esto existiera— tampoco. Es lo contrario al
+criterio de `redaction`, y la asimetría es intencional: equivocarse allí tapa un
+dato, equivocarse aquí publica un archivo. Por la misma razón, `expone` con una
+clase que no existe es un error duro y no un silencio.
+
+### Los dos perfiles del repositorio
+
+| Perfil | `por_defecto` | `expone` | Por qué |
+|---|---|---|---|
+| `autos` | `publico` | `[publico]` | Folletos y fichas que las marcas publican para que se lean. Un PDF nuevo entra expuesto sin que nadie lo clasifique |
+| `luis-cv` | `identidad` | `[]` | Credenciales. Entregar el archivo anularía el enmascarado: daría íntegro, en un PDF, el número que la respuesta tapa con asteriscos |
+
+El YAML de `luis-cv` deja escrito, comentado, qué habría que añadir para abrir el
+CV —el único documento de ese corpus que su dueño reparte él mismo—. Es una
+decisión suya, no una que herede de un defecto.
+
+### Lo que ve el usuario
+
+El panel de fuentes agrupa por documento y nombra el PDF real (`metadata.fuente`)
+en lugar del `document_id`, que es el nombre interno del trozo de markdown
+—`ficha-tecnica-hilux--001.md` no existe para nadie fuera del corpus—. Cada
+fragmento lleva un botón de **copiar cita**: como la metadata guarda el total de
+páginas y no la página del fragmento, pegar la frase en el buscador del visor es
+hoy la forma de llegar al sitio exacto.
+
+Un documento no expuesto **no se oculta**: se ve su nombre, su score y su texto,
+y solo se añade una nota diciendo que el archivo no se entrega. Esa nota aparece
+únicamente en temas que sí publican algunos documentos; en uno que no publica
+ninguno sería repetir en cada tarjeta lo que la cabecera ya dice una vez.
+
+### La respuesta también cita el PDF
+
+El panel dejaba de hablar de `.md` pero el modelo seguía escribiendo
+`[ficha-tecnica-hilux--003]` dentro del texto: dos nombres para lo mismo, y el
+que el lector veía primero era el que no podía buscar.
+
+El modelo solo cita lo que el prompt le pone entre corchetes, así que el cambio
+es el encabezado de cada fragmento en `prompts.render_context`, que ahora usa
+`Chunk.citation` —`metadata.fuente`, con `document_id` como respaldo— y omite
+`fuente` de la línea de metadatos para no invitar a citar `fuente=…`.
+
+Con eso, `_is_grounded` tenía que mirar el mismo nombre: comprobarlo contra
+`documents()` daría por no fundamentada una respuesta que cita el PDF
+correctamente. Ahora usa `RetrievalOutcome.citations()`, que es la lista de lo
+que el prompt pidió citar. `documents()` se queda como está porque es lo que
+mide la telemetría: ahí cada trozo cuenta por separado.
+
+Dos fragmentos del mismo PDF citan igual, y es lo que se busca: al lector le
+importa qué archivo abrir, no qué trozo del índice acertó.
+
+### Lo que queda pendiente
+
+- **La página de cada fragmento.** `extractors.limpiar` recibe las páginas por
+  separado y las funde antes de trocear, así que el límite se conoce y se tira.
+  Propagarlo daría *"página 3 de 12"* y habilitaría el enlace `#page=N`. Exige
+  reingesta.
+- **El archivo en sí.** `exposed: true` dice que se *puede* entregar, pero
+  todavía no hay de dónde: haría falta subir los originales a un prefijo aparte
+  de S3 y firmarlos desde el proxy de Astro. Eso matiza la postura escrita en
+  `sync-kb.sh` y merece decidirse aparte, no colarse aquí.

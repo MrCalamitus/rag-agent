@@ -56,6 +56,32 @@ banned_markers:
   - PASAPORTE
   - LICENCIA DE CONDUCIR
 
+# Qué documentos puede llegar a consultar el usuario: ninguno.
+#
+# El corpus son credenciales —título, cédula, constancias— y entregarlas como
+# archivo anularía el enmascarado que este perfil aplica sobre el texto: daría
+# íntegro, en un PDF, el mismo número que la respuesta tapa con asteriscos.
+#
+# La maquinaria queda montada por si algún día se quiere abrir el CV, que es un
+# documento que Luis reparte él mismo. Sería esto, y solo esto:
+#
+#   documentos:
+#     por_defecto: identidad
+#     expone: [publico]
+#     clases:
+#       publico:
+#         tipos: [cv]
+#       identidad:
+#         marcadores: [CÉDULA PROFESIONAL, CURP, RFC]
+#
+# El orden importa: el marcador gana a la ruta y la ruta al tipo, así que un CV
+# que llevara dentro la CURP caería en `identidad` y no se expondría. Esa es la
+# respuesta correcta, y es la razón de que se decida por contenido y no por
+# nombre de archivo.
+documentos:
+  por_defecto: identidad
+  expone: []
+
 corpus:
   # Documentos originales. Fuera del repositorio: llevan datos de identidad.
   source: ~/docsLuis

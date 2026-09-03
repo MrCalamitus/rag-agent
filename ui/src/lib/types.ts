@@ -13,6 +13,8 @@ export interface Profile {
   name: string;
   subject: string;
   masks_identifiers: boolean;
+  /** Si este tema publica alguno de sus documentos originales. */
+  exposes_documents?: boolean;
 }
 
 export interface ProfilesResponse {
@@ -39,6 +41,12 @@ export interface RetrievalResult {
   chunk: string;
   score: number;
   metadata?: Record<string, unknown>;
+  /**
+   * Si el perfil deja consultar el documento original de este fragmento. Lo
+   * decide el servicio aplicando la política del tema sobre la clase que la
+   * ingesta estampó; la UI no conoce ninguna de las dos cosas, solo el veredicto.
+   */
+  exposed?: boolean;
 }
 
 /** El ítem de la herramienta hospedada. Extensión propia, contrato §4. */

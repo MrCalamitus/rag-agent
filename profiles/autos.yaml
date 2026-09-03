@@ -64,6 +64,16 @@ path_metadata: [marca]
 
 banned_markers: []
 
+# Qué documentos puede llegar a consultar el usuario.
+#
+# Aquí todo: son folletos y fichas que las marcas publican para que se lean.
+# Poner `por_defecto: publico` significa que un PDF nuevo entra expuesto sin
+# que nadie lo clasifique — que es exactamente lo que se quiere en un corpus
+# de material promocional, y exactamente lo que NO se quiere en `luis-cv`.
+documentos:
+  por_defecto: publico
+  expone: [publico]
+
 corpus:
   source: corpus
   prepared: .corpus-preparado/autos

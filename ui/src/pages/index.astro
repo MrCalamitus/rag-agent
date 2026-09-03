@@ -109,7 +109,7 @@ function shorten(subject: string, limit = 52): string {
             </div>
           </main>
         ) : (
-          <Chat suggestions={suggestions} />
+          <Chat suggestions={suggestions} exposesDocuments={profile?.exposes_documents === true} />
         )
       }
     </div>
