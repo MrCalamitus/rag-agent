@@ -110,6 +110,16 @@ data "aws_iam_policy_document" "task" {
     }
   }
 
+  # Solo el prefijo de originales, nunca el corpus indexado. Son dos cosas
+  # distintas y por eso viven en prefijos distintos: lo que el agente puede
+  # recitar y lo que un lector puede abrir. Dar acceso al bucket entero borraría
+  # esa frontera en el único sitio donde de verdad se aplica.
+  statement {
+    sid       = "LeerDocumentosOriginales"
+    actions   = ["s3:GetObject"]
+    resources = ["${aws_s3_bucket.corpus.arn}/originales/*"]
+  }
+
   statement {
     sid       = "PublicarMetricasPropias"
     actions   = ["cloudwatch:PutMetricData"]
@@ -192,6 +202,7 @@ resource "aws_ecs_task_definition" "api" {
       { name = "RAG_PROFILE_KNOWLEDGE_BASES", value = jsonencode(local.knowledge_base_ids) },
       { name = "RAG_DEFAULT_PROFILE", value = var.default_profile },
       { name = "RAG_GUARDRAIL_ID", value = var.guardrail_id },
+      { name = "RAG_DOCUMENTS_BUCKET", value = aws_s3_bucket.corpus.id },
       { name = "RAG_MODEL_ALIASES", value = jsonencode(var.model_aliases) },
       { name = "RAG_MODEL_SAMPLING", value = jsonencode(var.model_sampling) },
     ]

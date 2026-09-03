@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 
 from .profile import DocumentPolicy
@@ -21,6 +22,10 @@ class Chunk:
     # porque es una decisión ya tomada: un cliente no debería tener que conocer
     # la política del tema para saber si puede ofrecer el documento.
     exposed: bool = False
+    # Dónde abrir el documento original, cuando se puede. Va aquí y no lo arma
+    # el cliente porque el enlace lleva un permiso firmado: construirlo exige el
+    # secreto del servicio.
+    document_url: str | None = None
 
     @property
     def citation(self) -> str:
@@ -71,20 +76,28 @@ class RetrievalOutcome:
         return tuple(seen)
 
 
-def aplicar_exposicion(outcome: RetrievalOutcome, policy: DocumentPolicy) -> RetrievalOutcome:
+def aplicar_exposicion(
+    outcome: RetrievalOutcome,
+    policy: DocumentPolicy,
+    *,
+    link: Callable[[str], str | None] | None = None,
+) -> RetrievalOutcome:
     """Marca cada fragmento según lo que el perfil deje consultar.
 
     Un fragmento no expuesto **no se oculta**: sigue apareciendo con su nombre,
     su score y su texto. Lo único que falta es el original. Esconder la
     evidencia entera sería peor que no dar el archivo, porque el recibo de qué
     sustentó la respuesta es justo lo que hace auditable al agente.
+
+    `link` produce la dirección del original y solo se llama sobre lo expuesto:
+    un enlace es un permiso, y no se firman permisos que no se han concedido.
     """
     if not outcome.chunks:
         return outcome
-    return replace(
-        outcome,
-        chunks=tuple(
-            replace(chunk, exposed=policy.expuesta(chunk.metadata.get("clase")))
-            for chunk in outcome.chunks
-        ),
-    )
+
+    def marcar(chunk: Chunk) -> Chunk:
+        expuesto = policy.expuesta(chunk.metadata.get("clase"))
+        url = link(chunk.citation) if expuesto and link else None
+        return replace(chunk, exposed=expuesto, document_url=url)
+
+    return replace(outcome, chunks=tuple(marcar(chunk) for chunk in outcome.chunks))

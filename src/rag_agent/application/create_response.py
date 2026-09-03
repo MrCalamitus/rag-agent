@@ -30,6 +30,7 @@ from ..domain.retrieval import RetrievalOutcome, aplicar_exposicion
 from .commands import CreateResponseCommand
 from .ports import (
     ClockPort,
+    DocumentLinkPort,
     IdGeneratorPort,
     KnowledgeBasePort,
     KnowledgeBaseRegistryPort,
@@ -53,6 +54,7 @@ class CreateResponse:
         clock: ClockPort,
         ids: IdGeneratorPort,
         telemetry: TelemetryPort,
+        document_links: DocumentLinkPort | None = None,
     ) -> None:
         self._catalog = catalog
         self._profiles = profiles
@@ -61,6 +63,7 @@ class CreateResponse:
         self._clock = clock
         self._ids = ids
         self._telemetry = telemetry
+        self._document_links = document_links
 
     async def stream(self, command: CreateResponseCommand) -> AsyncIterator[ev.DomainEvent]:
         # Resolver el alias antes de emitir nada: un alias inválido debe poder
@@ -236,7 +239,13 @@ class CreateResponse:
         # Se aplica aquí, sobre la clase que la ingesta estampó, y no en el
         # adaptador HTTP: si viviera allí, cada transporte nuevo tendría que
         # reimplementarla y alguno se olvidaría.
-        outcome = aplicar_exposicion(outcome, profile.documents)
+        outcome = aplicar_exposicion(
+            outcome,
+            profile.documents,
+            link=(lambda doc: self._document_links.link_for(profile, doc))
+            if self._document_links
+            else None,
+        )
         if outcome.latency_ms:
             return outcome
         return RetrievalOutcome(queries=outcome.queries, chunks=outcome.chunks, latency_ms=elapsed)

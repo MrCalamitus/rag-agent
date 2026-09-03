@@ -1,0 +1,49 @@
+---
+/**
+ * El visor del documento original, con el fragmento resaltado.
+ *
+ * Es la última pieza del argumento de auditabilidad: el panel de fuentes dice
+ * de qué documento salió la respuesta, y esto lleva al lector al párrafo exacto
+ * dentro del PDF. Sin resaltado el visor sería solo un enlace, y buscar a mano
+ * una frase en un folleto de 440 páginas es justo el trabajo que se pretende
+ * ahorrar.
+ *
+ * `<dialog>` nativo: trae el modal, el foco atrapado, el cierre con Escape y el
+ * fondo inerte sin una línea de JavaScript.
+ */
+import Icon from "./Icon.astro";
+---
+
+<dialog class="viewer" data-viewer aria-labelledby="viewer-titulo">
+  <header class="viewer__bar">
+    <Icon name="description" size={18} />
+    <h2 id="viewer-titulo" class="viewer__title" data-viewer-title></h2>
+
+    <div class="viewer__matches" data-viewer-nav hidden>
+      <button type="button" class="icon-button icon-button--quiet" data-viewer-prev
+        aria-label="Coincidencia anterior">
+        <Icon name="arrow_upward" size={16} />
+      </button>
+      <span data-viewer-count aria-live="polite"></span>
+      <button type="button" class="icon-button icon-button--quiet" data-viewer-next
+        aria-label="Coincidencia siguiente">
+        <Icon name="arrow_downward" size={16} />
+      </button>
+    </div>
+
+    <button type="button" class="icon-button icon-button--quiet" data-viewer-close
+      aria-label="Cerrar el documento">
+      <Icon name="close" size={18} />
+    </button>
+  </header>
+
+  <div class="viewer__body" data-viewer-body>
+    <p class="viewer__state" data-viewer-state>Abriendo el documento…</p>
+    <div class="viewer__page" data-viewer-page hidden>
+      <canvas data-viewer-canvas></canvas>
+      <!-- Las marcas van encima del canvas, posicionadas con la geometría que
+           da la capa de texto del PDF. -->
+      <div class="viewer__marks" data-viewer-marks></div>
+    </div>
+  </div>
+</dialog>

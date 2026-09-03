@@ -130,6 +130,18 @@ score y su texto, y solo se añade una nota de que el archivo no se entrega —y
 sería ruido repetido en cada tarjeta. La política vive en el `documentos:` del
 perfil, en el servicio; aquí solo se lee el veredicto.
 
+## El visor del documento
+
+Cuando el agente autoriza un documento, cada fragmento trae un botón que lo abre
+en un visor de pdf.js con la cita resaltada. La página no se sabe —la metadata
+guarda el total del documento, no la del fragmento— así que se busca en la capa
+de texto del PDF; buscar da además las coordenadas de la marca, que es lo que se
+quería. Si la cita no se localiza, el visor abre igual y lo dice.
+
+El PDF llega por `/api/document`, que reenvía al agente con el `Authorization`.
+El permiso viaja firmado en la query y este proxy no lo interpreta: la
+autorización se decidió al responder.
+
 ## Iconos
 
 Los iconos son **Material Symbols Rounded** servidos desde el propio origen —el

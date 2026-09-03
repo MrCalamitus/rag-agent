@@ -50,9 +50,17 @@ import Icon from "./Icon.astro";
 <template id="tpl-fragment">
   <div class="fragment">
     <div class="fragment__text" data-chunk></div>
-    <button type="button" class="icon-button icon-button--quiet" data-quote>
-      <Icon name="content_copy" size={14} />
-      <span data-quote-label>Copiar cita</span>
-    </button>
+    <div class="fragment__actions">
+      <!-- Solo aparece si el tema entrega este documento Y hay de dónde
+           servirlo: el agente manda el enlace ya firmado o no lo manda. -->
+      <button type="button" class="icon-button icon-button--quiet" data-open hidden>
+        <Icon name="find_in_page" size={14} />
+        <span>Ver en el documento</span>
+      </button>
+      <button type="button" class="icon-button icon-button--quiet" data-quote>
+        <Icon name="content_copy" size={14} />
+        <span data-quote-label>Copiar cita</span>
+      </button>
+    </div>
   </div>
 </template>

@@ -422,13 +422,73 @@ mide la telemetría: ahí cada trozo cuenta por separado.
 Dos fragmentos del mismo PDF citan igual, y es lo que se busca: al lector le
 importa qué archivo abrir, no qué trozo del índice acertó.
 
+---
+
+## El visor del documento, con la cita resaltada
+
+### El permiso firmado
+
+El agente decide qué documentos puede consultar el usuario **al responder**; el
+navegador los pide **después**, en una petición que no lleva ni pregunta ni
+fragmentos. El puente es un permiso firmado (`domain/documents.py`): cada
+fragmento expuesto sale con un `document_url` que lleva dentro qué documento, de
+qué tema y hasta cuándo, firmado con el secreto del servicio.
+
+`GET /v1/documents/{nombre}` no vuelve a resolver la política: verifica la firma.
+Así la decisión se toma una sola vez, donde hay contexto para tomarla, y es
+imposible pedir un documento que el agente no autorizó ni conociendo su nombre.
+La alternativa —resolver la política otra vez en el endpoint— exigiría averiguar
+la clase de un documento a partir de su nombre, que es justo lo que la ingesta
+existe para no tener que hacer.
+
+### Los bytes pasan por el servicio
+
+En lugar de una URL prefirmada de S3. Cuesta un salto más y a cambio: el
+navegador nunca habla con S3 —sin abrir CORS en el bucket—, el enlace caduca
+cuando lo decide el servicio y no una firma de AWS, y no queda ninguna URL de S3
+circulando por un historial. Dos adaptadores tras un mismo puerto:
+`LocalDocumentStore` (el disco, en desarrollo) y `S3DocumentStore` (el prefijo
+`originales/`, en el despliegue).
+
+Ese prefijo es el contrario deliberado del corpus indexado y **no** es origen de
+datos de ninguna Knowledge Base: lo que entra al índice es lo que el agente puede
+recitar; lo que entra aquí es lo que un lector puede abrir. `sync-originales.sh`
+sube solo los archivos cuya clase el perfil expone, preguntándole al mismo código
+que decide en tiempo de respuesta para que no puedan discrepar.
+
+### Encontrar la cita sin saber la página
+
+La metadata guarda el total de páginas del documento, no la del fragmento, así
+que la página no se sabe: se busca con la capa de texto de pdf.js. Sale mejor de
+lo que suena, porque buscar da además las coordenadas para dibujar la marca, que
+es lo que de verdad se quería.
+
+Tres detalles que costaron y conviene no volver a descubrir:
+
+- **Una sola pasada por el documento.** La primera versión buscaba cada aguja
+  recorriendo el PDF entero; sobre un manual de 440 páginas eso es la diferencia
+  entre un segundo y un minuto con el visor en blanco. Ahora se extrae el texto
+  de cada página una vez y se prueban todas las agujas contra ella.
+- **Los pintados se encadenan.** pdf.js rechaza dos `render()` sobre el mismo
+  canvas —*"Cannot use the same canvas during multiple render() operations"*— y
+  `cancel()` no basta, porque cancelar pide el fin pero no lo espera. Abrir un
+  documento y redimensionar la ventana se solapan con facilidad.
+- **Un `<dialog>` cerrado lo oculta el navegador con `display: none`, pero esa
+  regla es del agente de usuario** y cualquier `display` de autor la gana. Sin
+  `.viewer:not([open]) { display: none }` el visor se ve siempre.
+
+Cuando la cita no se localiza —el fragmento cruzó un salto de página, o el PDF
+tiene el texto en una capa que no coincide con lo que extrajo la ingesta— el
+visor abre igual y lo dice. Callarlo dejaría al lector buscando a mano sin saber
+por qué.
+
 ### Lo que queda pendiente
 
+- **Subir los originales y desplegar.** El código está completo y probado en
+  local contra el disco, pero en producción falta `make sync-originales
+  PROFILE=autos`, dar al rol de la task permiso de `s3:GetObject` sobre
+  `originales/*`, poner `RAG_DOCUMENTS_BUCKET` en la task definition y desplegar.
 - **La página de cada fragmento.** `extractors.limpiar` recibe las páginas por
   separado y las funde antes de trocear, así que el límite se conoce y se tira.
-  Propagarlo daría *"página 3 de 12"* y habilitaría el enlace `#page=N`. Exige
-  reingesta.
-- **El archivo en sí.** `exposed: true` dice que se *puede* entregar, pero
-  todavía no hay de dónde: haría falta subir los originales a un prefijo aparte
-  de S3 y firmarlos desde el proxy de Astro. Eso matiza la postura escrita en
-  `sync-kb.sh` y merece decidirse aparte, no colarse aquí.
+  Propagarlo evitaría la búsqueda en documentos largos y daría *"página 3 de
+  12"*. Exige reingesta.

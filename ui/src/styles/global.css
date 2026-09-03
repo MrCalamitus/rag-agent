@@ -513,6 +513,114 @@ textarea {
   color: var(--ink-faint);
 }
 
+/* --- Visor del documento -------------------------------------------------- */
+
+/* Un `<dialog>` cerrado lo oculta el navegador con `display: none`, pero esa
+   regla es del agente de usuario y cualquier `display` de autor la gana. Sin
+   esto, el visor se ve siempre. */
+.viewer:not([open]) {
+  display: none;
+}
+
+.viewer {
+  width: min(96vw, 940px);
+  max-width: none;
+  height: min(92dvh, 1100px);
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+  color: var(--ink);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow: var(--shadow-md);
+}
+
+.viewer::backdrop {
+  background: rgb(0 0 0 / 0.55);
+}
+
+.viewer__bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-raised);
+}
+
+.viewer__title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1;
+}
+
+.viewer__matches {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: var(--text-xs);
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+
+.viewer__body {
+  flex: 1;
+  overflow: auto;
+  padding: var(--sp-3);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  /* Gris neutro: una página blanca sobre fondo claro pierde su borde, y sobre
+     el fondo oscuro del tema deslumbra. */
+  background: var(--surface-sunken);
+}
+
+.viewer__state {
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
+  padding: var(--sp-5);
+  text-align: center;
+}
+
+.viewer__page {
+  position: relative;
+  line-height: 0;
+  box-shadow: var(--shadow-md);
+}
+
+.viewer__page canvas {
+  display: block;
+  border-radius: 2px;
+}
+
+/* Las marcas van encima del canvas y no interceptan el ratón: seleccionar
+   texto de la página tiene que seguir funcionando. */
+.viewer__marks {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.viewer__mark {
+  position: absolute;
+  /* Multiplicado en lugar de opaco: subraya sin tapar las letras, que es lo
+     que hace un rotulador de verdad.
+
+     Y sin variante para el tema oscuro a propósito: el papel de un PDF es
+     blanco lo mire quien lo mire, así que la marca se calcula contra el papel
+     y no contra la interfaz. La primera versión usaba `screen` en oscuro y el
+     resaltado desaparecía sobre el blanco de la página. */
+  background: rgb(255 214 10 / 0.45);
+  mix-blend-mode: multiply;
+  border-radius: 2px;
+}
+
 /* El nodo que anuncian los lectores de pantalla. Vive fuera de la vista pero
    no en `display: none`, que lo sacaría del árbol de accesibilidad. */
 .sr-only {

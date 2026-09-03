@@ -8,6 +8,7 @@
  */
 
 import { readSse } from "../../lib/sse";
+import { openDocument } from "./viewer";
 import {
   KNOWLEDGE_SEARCH,
   type KnowledgeSearchItem,
@@ -269,13 +270,37 @@ const META_OCULTA = new Set([
   "origen_texto",
 ]);
 
+interface Fragmento {
+  texto: string;
+  url: string | null;
+}
+
 interface Documento {
   nombre: string;
   ruta: string;
   score: number;
   expuesto: boolean;
   metadata: Record<string, unknown>;
-  fragmentos: string[];
+  fragmentos: Fragmento[];
+}
+
+/**
+ * Del enlace que firma el agente al del proxy de Astro.
+ *
+ * El agente devuelve `/v1/documents/<nombre>?permiso…`, que el navegador no
+ * puede pedir: no hay CORS y no tiene el token. El proxy sí, y solo reenvía el
+ * permiso, sin interpretarlo.
+ */
+function aProxy(documentUrl: string): string | null {
+  try {
+    const url = new URL(documentUrl, window.location.origin);
+    const nombre = decodeURIComponent(url.pathname.split("/").pop() ?? "");
+    if (!nombre) return null;
+    url.searchParams.set("name", nombre);
+    return `/api/document?${url.searchParams}`;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -295,10 +320,15 @@ function agrupar(results: RetrievalResult[]): Documento[] {
     const ruta = fuente || result.document_id;
     const previo = porDocumento.get(ruta);
 
+    const fragmento: Fragmento = {
+      texto: result.chunk ?? "",
+      url: result.document_url ? aProxy(result.document_url) : null,
+    };
+
     if (previo) {
       previo.score = Math.max(previo.score, result.score ?? 0);
       previo.expuesto &&= result.exposed === true;
-      previo.fragmentos.push(result.chunk ?? "");
+      previo.fragmentos.push(fragmento);
       continue;
     }
 
@@ -308,7 +338,7 @@ function agrupar(results: RetrievalResult[]): Documento[] {
       score: result.score ?? 0,
       expuesto: result.exposed === true,
       metadata,
-      fragmentos: [result.chunk ?? ""],
+      fragmentos: [fragmento],
     });
   }
 
@@ -356,27 +386,37 @@ function renderSource(documento: Documento, exposesDocuments: boolean): Document
   }
 
   const fragmentos = select(node, "[data-fragments]");
-  for (const texto of documento.fragmentos) fragmentos.append(renderFragment(texto));
+  for (const fragmento of documento.fragmentos) {
+    fragmentos.append(renderFragment(fragmento, documento.nombre));
+  }
   return node;
 }
 
 /**
- * Un fragmento con su botón de copiar.
+ * Un fragmento, con el botón de abrirlo en el documento y el de copiarlo.
  *
  * Copiar la cita es hoy la forma de encontrarla: la metadata guarda el total de
  * páginas del documento, no la página de la que salió este trozo, así que no se
  * puede decir "página 3". Pegar la frase en el buscador del visor sí lleva al
  * sitio exacto.
  */
-function renderFragment(texto: string): DocumentFragment {
+function renderFragment(fragmento: Fragmento, nombre: string): DocumentFragment {
   const node = clone("tpl-fragment");
-  select(node, "[data-chunk]").textContent = texto;
+  select(node, "[data-chunk]").textContent = fragmento.texto;
+
+  if (fragmento.url) {
+    const abrir = select<HTMLButtonElement>(node, "[data-open]");
+    abrir.hidden = false;
+    abrir.addEventListener("click", () => {
+      void openDocument(fragmento.url as string, nombre, fragmento.texto);
+    });
+  }
 
   const boton = select<HTMLButtonElement>(node, "[data-quote]");
   const label = select(node, "[data-quote-label]");
   boton.addEventListener("click", async () => {
     try {
-      await navigator.clipboard.writeText(texto);
+      await navigator.clipboard.writeText(fragmento.texto);
       label.textContent = "Copiada";
       setTimeout(() => (label.textContent = "Copiar cita"), 1600);
     } catch {

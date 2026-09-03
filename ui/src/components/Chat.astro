@@ -8,6 +8,7 @@
 import Icon from "./Icon.astro";
 import Message from "./Message.astro";
 import Sources from "./Sources.astro";
+import Viewer from "./Viewer.astro";
 
 interface Props {
   suggestions: string[];
@@ -74,9 +75,13 @@ const { suggestions, exposesDocuments } = Astro.props;
 
   <Message />
   <Sources />
+  <Viewer />
 </div>
 
 <script>
   import { initChat } from "./client/chat";
+  import { initViewer } from "./client/viewer";
+
+  initViewer(document);
   initChat(document);
 </script>

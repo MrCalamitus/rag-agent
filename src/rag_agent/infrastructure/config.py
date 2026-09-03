@@ -98,6 +98,11 @@ class Settings(BaseSettings):
     # correctamente aunque reciba fragmentos que no vienen al caso. Se conserva
     # el parámetro para corpus mayores, donde los scores sí se separan.
     retrieval_min_score: float = 0.0
+    # Bucket con los documentos ORIGINALES, en un prefijo aparte del corpus
+    # indexado y que ninguna Knowledge Base usa como origen de datos. Vacío en
+    # local: allí los originales se leen del disco que declara cada perfil.
+    documents_bucket: str | None = None
+
     rate_limit_per_minute: int = 20
     request_timeout_s: float = 110.0  # por debajo del idle_timeout del ALB (120 s)
     # La sonda de readiness debe contestar mucho antes que el health check del

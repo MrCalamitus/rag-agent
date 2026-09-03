@@ -47,6 +47,7 @@ soportar todo y falla en silencio es peor que uno con superficie honesta.
 ```
 POST /v1/responses          # crear respuesta
 GET  /v1/profiles           # temas servidos por este despliegue (extensión)
+GET  /v1/documents/{nombre} # documento original, con permiso firmado (extensión)
 GET  /healthz               # liveness — sin auth, para el health check del ALB
 GET  /readyz                # readiness — verifica Bedrock y las KB alcanzables
 ```
@@ -92,6 +93,27 @@ documentación hay indexada, y eso ya es información.
 `exposes_documents` dice si el tema publica alguno de sus documentos originales.
 Existe para que un cliente sepa si tiene sentido ofrecerlos sin tener que pedir
 uno y ver si falla.
+
+**`GET /v1/documents/{nombre}`.** Entrega el archivo original de un fragmento.
+No vuelve a resolver la política del tema: verifica el permiso firmado que viaja
+en `document_url` (`profile`, `exp`, `sig`). La decisión se toma una sola vez, al
+responder, que es donde hay contexto para tomarla; aquí solo se comprueba que
+existe y sigue vigente. Sigue exigiendo `Authorization`: el permiso dice *qué*
+documento, no *quién* puede pedirlo.
+
+| Situación | Respuesta |
+|---|---|
+| Permiso válido | `200` con el archivo, `Content-Disposition: inline` |
+| Firma inválida o caducada | `401`, `code: invalid_document_grant` |
+| El tema no expone documentos | `404`, `code: documents_not_exposed` |
+| El despliegue no tiene almacén | `404`, `code: documents_not_available` |
+| El archivo no está | `404`, `code: document_not_found` |
+
+Los bytes pasan por el servicio en lugar de entregarse con una URL prefirmada de
+S3. Cuesta un salto más, y a cambio el navegador nunca habla con S3 —así que no
+hace falta abrir CORS en el bucket—, el enlace caduca cuando lo decide el
+servicio y no una firma de AWS, y no queda ninguna URL de S3 circulando por un
+historial.
 
 ### Cabeceras de respuesta
 
@@ -250,7 +272,8 @@ recibo verificable de qué se recuperó y con qué consulta:
       "chunk": "…",
       "score": 0.87,
       "metadata": { "tipo": "documento_oficial", "anio": 2021, "clase": "identidad" },
-      "exposed": false
+      "exposed": false,
+      "document_url": null
     }
   ],
   "latency_ms": 340
@@ -273,6 +296,14 @@ Por defecto un perfil **no expone nada**, y un fragmento sin `clase` —un corpu
 preparado antes de que esto existiera— tampoco. Es lo contrario al criterio de
 `redaction`, que por defecto no enmascara, y la asimetría es intencional:
 equivocarse allí tapa un dato, equivocarse aquí publica un archivo.
+
+**`document_url` (extensión).** Dónde abrir el documento original, o `null`.
+Presente solo cuando `exposed` es `true` **y** este despliegue tiene de dónde
+servirlo: autorizar y poder entregar son cosas distintas. Es una ruta relativa
+—el servicio no sabe bajo qué host lo publican, y una URL absoluta armada con la
+cabecera `Host` es una manera conocida de acabar firmando enlaces a otro sitio—
+y lleva un permiso firmado con el secreto del servicio. El cliente no puede
+fabricarla.
 
 Que un fragmento no esté expuesto **no lo excluye de `results`**. Sigue con su
 `document_id`, su `score` y su `chunk`: el recibo de qué sustentó la respuesta es

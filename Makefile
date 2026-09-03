@@ -88,6 +88,11 @@ sync-kb: ## Sube el corpus de un tema a S3 y lanza la ingesta (PROFILE=slug)
 	@test -n "$$PROFILE" -o -n "$$CORPUS" || (echo "Uso: make sync-kb PROFILE=autos" && exit 1)
 	RAG_PROFILE=$$PROFILE ./scripts/sync-kb.sh $$CORPUS
 
+.PHONY: sync-originales
+sync-originales: ## Sube los documentos originales que el tema expone (PROFILE=slug)
+	@test -n "$$PROFILE" || (echo "Uso: make sync-originales PROFILE=autos" && exit 1)
+	./scripts/sync-originales.sh $$PROFILE
+
 .PHONY: smoke
 smoke: ## Verificación rápida contra el desplegado
 	./scripts/smoke.sh

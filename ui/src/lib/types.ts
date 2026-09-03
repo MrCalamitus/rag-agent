@@ -47,6 +47,12 @@ export interface RetrievalResult {
    * ingesta estampó; la UI no conoce ninguna de las dos cosas, solo el veredicto.
    */
   exposed?: boolean;
+  /**
+   * Dónde abrir el documento original. Lo firma el agente al responder, así que
+   * su ausencia significa «no autorizado» o «no hay de dónde servirlo», y en
+   * ninguno de los dos casos puede el cliente fabricarlo.
+   */
+  document_url?: string | null;
 }
 
 /** El ítem de la herramienta hospedada. Extensión propia, contrato §4. */

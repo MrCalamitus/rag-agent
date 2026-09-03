@@ -32,6 +32,9 @@ def item_to_dict(item: OutputItem) -> dict[str, Any]:
                     # documento original de este fragmento. El cliente no tiene
                     # que conocer la política para saberlo.
                     "exposed": chunk.exposed,
+                    # Presente solo si además hay de dónde servirlo: autorizar
+                    # y poder entregar son cosas distintas.
+                    "document_url": chunk.document_url,
                 }
                 for chunk in item.outcome.chunks
             ],

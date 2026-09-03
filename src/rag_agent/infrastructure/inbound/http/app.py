@@ -18,10 +18,11 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from fastapi import APIRouter, FastAPI, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import ValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from ....domain.documents import DocumentGrant, GrantError, verify_grant
 from ....domain.errors import AgentError, ErrorType, invalid_request
 from ....domain.items import ResponseStatus
 from ...config import Settings
@@ -71,6 +72,14 @@ def create_app(container: Container | None = None, settings: Settings | None = N
     return app
 
 
+def _entero(valor: str | None) -> int:
+    """Un `exp` no numérico es un permiso mal formado, no un error del servidor."""
+    try:
+        return int(valor or "")
+    except ValueError:
+        return -1
+
+
 def _router() -> APIRouter:
     router = APIRouter()
 
@@ -110,6 +119,76 @@ def _router() -> APIRouter:
                     for binding in registro.bindings()
                 ],
             }
+        )
+
+    @router.get("/v1/documents/{document}")
+    async def document(document: str, request: Request) -> Any:
+        """Entrega un documento original.
+
+        No vuelve a resolver la política del perfil: verifica el permiso firmado
+        que el agente emitió junto al fragmento. La decisión se toma una sola
+        vez, al responder, que es donde hay contexto para tomarla; aquí solo se
+        comprueba que existe y que sigue vigente.
+
+        Sigue exigiendo `Authorization`: el permiso dice *qué* documento, no
+        *quién* puede pedirlo.
+        """
+        container: Container = request.app.state.container
+        authenticate(request.headers.get("authorization"), container.settings.api_token)
+        request.app.state.rate_limiter.check(_client_key(request))
+
+        if container.document_store is None:
+            raise AgentError(
+                message="Este despliegue no entrega documentos originales.",
+                type=ErrorType.NOT_FOUND,
+                code="documents_not_available",
+            )
+
+        grant = DocumentGrant(
+            profile=request.query_params.get("profile", ""),
+            document=document,
+            expires_at=_entero(request.query_params.get("exp")),
+        )
+        try:
+            verify_grant(
+                grant,
+                request.query_params.get("sig", ""),
+                container.settings.api_token,
+                now=int(container.clock.unix_seconds()),
+            )
+        except GrantError as fallo:
+            # 403 y no 404: el permiso es el que falla, y decir "no existe"
+            # mandaría a depurar el nombre del archivo en vez del enlace.
+            raise AgentError(
+                message=f"El enlace al documento no es válido: {fallo}.",
+                type=ErrorType.AUTHENTICATION_ERROR,
+                code="invalid_document_grant",
+            ) from fallo
+
+        profile = container.profiles.resolve(grant.profile)
+        if not profile.documents.expone_algo:
+            raise AgentError(
+                message=f"El tema '{profile.slug}' no entrega sus documentos.",
+                type=ErrorType.NOT_FOUND,
+                code="documents_not_exposed",
+            )
+
+        encontrado = await container.document_store.fetch(profile, document)
+        if encontrado is None:
+            raise AgentError(
+                message="El documento no está disponible en este despliegue.",
+                type=ErrorType.NOT_FOUND,
+                code="document_not_found",
+            )
+        return Response(
+            content=encontrado.content,
+            media_type=encontrado.media_type,
+            headers={
+                # `inline` para que el visor lo abra en vez de descargarlo, y el
+                # nombre entre comillas porque los folletos llevan espacios.
+                "Content-Disposition": f'inline; filename="{encontrado.name}"',
+                "Cache-Control": "private, max-age=300",
+            },
         )
 
     @router.post("/v1/responses")

@@ -19,6 +19,8 @@ from ..application.check_readiness import CheckReadiness
 from ..application.create_response import CreateResponse
 from ..application.ports import (
     ClockPort,
+    DocumentLinkPort,
+    DocumentStorePort,
     IdGeneratorPort,
     KnowledgeBasePort,
     KnowledgeBaseRegistryPort,
@@ -29,6 +31,7 @@ from ..application.ports import (
 )
 from ..domain.profile import GENERIC, RetrievalPolicy
 from .config import Settings
+from .outbound.documents import LocalDocumentStore, S3DocumentStore, SignedDocumentLinks
 from .outbound.knowledge_bases import PerProfileKnowledgeBases, SingleKnowledgeBase
 from .outbound.local.clock import SystemClock
 from .outbound.local.corpus_knowledge_base import LocalCorpusKnowledgeBase
@@ -49,6 +52,8 @@ class Container:
     clock: ClockPort
     ids: IdGeneratorPort
     telemetry: TelemetryPort
+    document_links: DocumentLinkPort | None
+    document_store: DocumentStorePort | None
     create_response: CreateResponse
     check_readiness: CheckReadiness
 
@@ -157,6 +162,39 @@ def build_language_model(settings: Settings) -> LanguageModelPort:
     return GroundedStubLanguageModel(delta_delay_ms=settings.stub_delta_delay_ms)
 
 
+def build_document_store(
+    settings: Settings, profiles: StaticProfileRegistry
+) -> DocumentStorePort | None:
+    """De dónde salen los originales, si es que hay de dónde.
+
+    `None` es una respuesta legítima y frecuente: un despliegue puede autorizar
+    a consultar documentos y no tener todavía dónde guardarlos. En ese caso los
+    fragmentos siguen llegando con `exposed`, pero sin enlace.
+    """
+    if not any(b.profile.exposes_documents for b in profiles.bindings()):
+        return None
+
+    if settings.documents_bucket:
+        from .outbound.bedrock.clients import RETRIEVAL, build_client
+
+        return S3DocumentStore(
+            settings.documents_bucket,
+            lambda: build_client(
+                "s3",
+                region=settings.aws_region,
+                profile=settings.aws_profile,
+                config=RETRIEVAL,
+            ),
+        )
+
+    carpetas = {
+        b.slug: b.source_dir
+        for b in profiles.bindings()
+        if b.profile.exposes_documents and b.source_dir
+    }
+    return LocalDocumentStore(carpetas) if carpetas else None
+
+
 def build_container(
     settings: Settings | None = None,
     *,
@@ -168,6 +206,8 @@ def build_container(
     clock: ClockPort | None = None,
     ids: IdGeneratorPort | None = None,
     telemetry: TelemetryPort | None = None,
+    document_store: DocumentStorePort | None = None,
+    document_links: DocumentLinkPort | None = None,
 ) -> Container:
     """Los parámetros opcionales existen para las pruebas: sustituir un puerto
     no debe requerir variables de entorno ni monkeypatching."""
@@ -189,6 +229,14 @@ def build_container(
     language_model = language_model or build_language_model(settings)
     clock = clock or SystemClock()
     ids = ids or UuidGenerator()
+    document_store = (
+        document_store if document_store is not None else build_document_store(settings, profiles)
+    )
+    # Solo se firman enlaces si hay de dónde servirlos: un enlace que siempre
+    # devuelve 404 es peor que no ofrecerlo.
+    document_links = document_links or (
+        SignedDocumentLinks(settings.api_token, clock) if document_store else None
+    )
 
     return Container(
         settings=settings,
@@ -199,6 +247,8 @@ def build_container(
         clock=clock,
         ids=ids,
         telemetry=telemetry,
+        document_links=document_links,
+        document_store=document_store,
         create_response=CreateResponse(
             catalog=catalog,
             profiles=profiles,
@@ -207,6 +257,7 @@ def build_container(
             clock=clock,
             ids=ids,
             telemetry=telemetry,
+            document_links=document_links,
         ),
         check_readiness=CheckReadiness(
             catalog=catalog,

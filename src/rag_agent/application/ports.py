@@ -51,6 +51,41 @@ class KnowledgeBasePort(Protocol):
 
 
 @runtime_checkable
+class DocumentLinkPort(Protocol):
+    """De dónde sale el enlace a un documento original.
+
+    Devuelve `None` cuando este despliegue no puede entregar el archivo — sin
+    almacén configurado, por ejemplo—. Que un perfil autorice a consultarlo y
+    que exista de dónde servirlo son dos cosas distintas, y la segunda es de
+    infraestructura.
+    """
+
+    def link_for(self, profile: Profile, document: str) -> str | None: ...
+
+
+@dataclass(frozen=True)
+class StoredDocument:
+    """Un documento original listo para enviar al navegador."""
+
+    content: bytes
+    media_type: str
+    name: str
+
+
+@runtime_checkable
+class DocumentStorePort(Protocol):
+    """Dónde viven los documentos originales.
+
+    En local son los archivos que el usuario tiene en disco; en el despliegue,
+    un prefijo de S3 aparte del corpus indexado. Separados a propósito: lo que
+    entra al índice es lo que el agente puede recitar, y no tiene por qué
+    coincidir con lo que un lector puede abrir.
+    """
+
+    async def fetch(self, profile: Profile, document: str) -> StoredDocument | None: ...
+
+
+@runtime_checkable
 class ProfileRegistryPort(Protocol):
     """Los temas que este despliegue sabe responder.
 
