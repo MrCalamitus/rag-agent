@@ -7,7 +7,7 @@ folleto de coche de 40 páginas como fragmento único produce dos fallos a la ve
 el agente cita «el folleto» para cualquier afirmación, sin poder señalar dónde
 lo dice, y cada turno paga decenas de miles de tokens de prompt.
 
-Dos propiedades que el troceo debe cumplir:
+Tres propiedades que el troceo debe cumplir:
 
 1. **Cortar por costuras del texto, no por posición.** Se prefiere el límite de
    sección (encabezado Markdown), luego el de párrafo, luego el de frase. Un
@@ -16,6 +16,10 @@ Dos propiedades que el troceo debe cumplir:
 2. **Solapar.** El dato que cae justo en la costura tiene que aparecer entero
    en uno de los dos lados. El solape se toma del final del fragmento anterior,
    respetando también el límite de párrafo o frase.
+3. **Repetir la cabecera de una tabla partida.** Una fila de ficha técnica sin
+   su cabecera es un renglón de viñetas del que no se sabe a qué versión
+   pertenece. Partir la tabla sin repetirla deshace en el troceo justo lo que
+   costó recuperar al extraer.
 """
 
 from __future__ import annotations
@@ -30,6 +34,9 @@ from .profile import ChunkPolicy
 _ENCABEZADO = re.compile(r"^#{1,6} .+$", re.MULTILINE)
 _PARRAFO = re.compile(r"\n\s*\n")
 _FRASE = re.compile(r"(?<=[.!?:;])\s+")
+# Línea de guiones de una tabla Markdown: `|---|---:|`, con o sin barras
+# en los extremos. Tiene que haber al menos un guion.
+_SEPARADOR_TABLA = re.compile(r"^\s*\|?[\s:|-]*-[\s:|-]*\|?\s*$")
 
 
 @dataclass(frozen=True)
@@ -64,22 +71,44 @@ def _bloques(texto: str) -> list[str]:
     return bloques
 
 
-def _partir_bloque(bloque: str, max_chars: int) -> list[str]:
-    """Un bloque que ya excede el máximo se parte por frases, y si no hay
-    frases —una tabla larga, un listado— por líneas. Nunca a mitad de línea:
-    una fila de especificaciones cortada por la mitad no es evidencia."""
-    if len(bloque) <= max_chars:
-        return [bloque]
+def _cabecera_de_tabla(bloque: str) -> tuple[str, list[str]] | None:
+    """Cabecera y filas de una tabla Markdown, o `None` si el bloque no lo es.
+
+    La segunda línea —la de guiones— es la firma inequívoca del formato, y
+    basta con ella: cualquier otra heurística confundiría una tabla con un
+    listado que empieza por barra.
+    """
+    lineas = bloque.splitlines()
+    if len(lineas) < 3 or not lineas[0].lstrip().startswith("|"):
+        return None
+    if not _SEPARADOR_TABLA.match(lineas[1]):
+        return None
+    corte = 2
+    # Un rótulo que ocupa el ancho de la tabla —«MAZDA3 SEDÁN 2026» repetido en
+    # todas las celdas— es la primera fila, pero los nombres de las columnas
+    # están en la siguiente. Repetir solo el rótulo daría un fragmento que dice
+    # de qué modelo habla y no de qué versión, que es la pregunta que se hace.
+    if len(lineas) > 3 and _es_rotulo(lineas[0]):
+        corte = 3
+    return "\n".join(lineas[:corte]), lineas[corte:]
+
+
+def _es_rotulo(fila: str) -> bool:
+    """Fila cuyas celdas dicen todas lo mismo: un título que abarca la tabla."""
+    celdas = [c.strip() for c in fila.strip().strip("|").split("|")]
+    llenas = {c for c in celdas if c}
+    return len(celdas) > 1 and len(llenas) == 1
+
+
+def _unir(unidades: list[str], max_chars: int, junta: str = "\n") -> list[str]:
+    """Agrupa unidades en piezas que no pasen del máximo, sin partir ninguna."""
     piezas: list[str] = []
     actual = ""
-    unidades = _FRASE.split(bloque)
-    if len(unidades) == 1:
-        unidades = bloque.splitlines()
     for unidad in unidades:
         unidad = unidad.strip()
         if not unidad:
             continue
-        candidato = f"{actual} {unidad}".strip() if actual else unidad
+        candidato = f"{actual}{junta}{unidad}" if actual else unidad
         if actual and len(candidato) > max_chars:
             piezas.append(actual)
             actual = unidad
@@ -90,16 +119,56 @@ def _partir_bloque(bloque: str, max_chars: int) -> list[str]:
     return piezas
 
 
+def _partir_bloque(bloque: str, max_chars: int) -> list[str]:
+    """Un bloque que ya excede el máximo se parte por frases, y si no hay
+    frases —una tabla larga, un listado— por líneas. Nunca a mitad de línea:
+    una fila de especificaciones cortada por la mitad no es evidencia.
+
+    Una tabla se parte además **repitiendo su cabecera en cada pieza**. Sin eso
+    el troceo deshace justo lo que hace valiosa a una tabla: el fragmento que
+    dice `| Espejo electrocrómico | - | • | • |` llega a la recuperación sin
+    saber que esas columnas son las versiones, y el agente no puede responder
+    de cuál habla. La cabecera cuesta unos cientos de caracteres por fragmento
+    y es la diferencia entre un dato y un renglón de viñetas sueltas.
+    """
+    if len(bloque) <= max_chars:
+        return [bloque]
+
+    if (tabla := _cabecera_de_tabla(bloque)) is not None:
+        cabecera, filas = tabla
+        # Se descuenta la cabecera del presupuesto: se repite en cada pieza, así
+        # que tiene que caber *dentro* del máximo y no por encima de él.
+        cuerpo = _unir(filas, max(1, max_chars - len(cabecera) - 1))
+        return [f"{cabecera}\n{pieza}" for pieza in cuerpo]
+
+    unidades = _FRASE.split(bloque)
+    if len(unidades) > 1:
+        # Frases: se reconstruyen con espacio, que es como estaban escritas.
+        return _unir(unidades, max_chars, junta=" ")
+    # Líneas: se reconstruyen con salto. Unirlas con espacio aplastaba en un
+    # solo renglón las filas de cualquier tabla que hubiera que partir.
+    return _unir(bloque.splitlines(), max_chars)
+
+
 def _cola(texto: str, overlap: int) -> str:
-    """Últimos `overlap` caracteres, extendidos hasta una costura hacia atrás."""
-    if overlap <= 0 or len(texto) <= overlap:
-        return texto if overlap > 0 else ""
-    recorte = texto[-overlap:]
-    for separador in ("\n\n", ". ", "\n", " "):
-        posicion = recorte.find(separador)
-        if 0 <= posicion < len(recorte) - 1:
-            return recorte[posicion + len(separador) :].strip()
-    return recorte.strip()
+    """Últimos `overlap` caracteres, extendidos hasta una costura hacia atrás.
+
+    De ahí se descartan las filas de tabla: una fila sin su cabecera es el
+    renglón de viñetas anónimo que el troceo se ocupa de no producir, y la pieza
+    que abre el fragmento siguiente ya viene con la suya. Solapar aquí solo
+    añadiría ruido delante del dato bueno.
+    """
+    if overlap <= 0:
+        return ""
+    recorte = texto if len(texto) <= overlap else texto[-overlap:]
+    if len(texto) > overlap:
+        for separador in ("\n\n", ". ", "\n", " "):
+            posicion = recorte.find(separador)
+            if 0 <= posicion < len(recorte) - 1:
+                recorte = recorte[posicion + len(separador) :]
+                break
+    sin_filas = [l for l in recorte.splitlines() if not l.lstrip().startswith("|")]
+    return "\n".join(sin_filas).strip()
 
 
 def split(texto: str, policy: ChunkPolicy) -> tuple[TextChunk, ...]:
