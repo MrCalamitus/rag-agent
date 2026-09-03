@@ -30,9 +30,16 @@ from . import PaginaExtraida, ResultadoOcr
 VERSION = 3
 
 
-def clave(pdf: Path, *, motor: str, dpi: int) -> str:
+def clave(pdf: Path, *, motor: str, dpi: int, seleccion: str = "") -> str:
+    """Huella del contenido más los ajustes que cambian el resultado.
+
+    `seleccion` entra en la huella porque una transcripción de tres páginas y
+    otra de ochenta y cinco no son el mismo resultado: sin distinguirlas, una
+    prueba acotada dejaría cacheado un documento a medias como si fuera el
+    definitivo.
+    """
     digest = hashlib.sha256()
-    digest.update(f"v{VERSION}|{motor}|{dpi}|".encode())
+    digest.update(f"v{VERSION}|{motor}|{dpi}|{seleccion}|".encode())
     with pdf.open("rb") as f:
         for bloque in iter(lambda: f.read(1 << 20), b""):
             digest.update(bloque)

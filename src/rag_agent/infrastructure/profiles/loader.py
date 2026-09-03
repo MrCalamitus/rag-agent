@@ -128,7 +128,7 @@ def parse_profile(datos: dict[str, Any], *, origen: str = "<memoria>") -> Profil
 
     retrieval = _tramo(datos, "retrieval", {"top_k", "min_score"}, origen)
     chunking = _tramo(datos, "chunking", {"max_chars", "overlap_chars", "min_chars_to_split"}, origen)
-    ocr = _tramo(datos, "ocr", {"motor", "min_chars", "dpi", "max_paginas", "idioma", "min_chars_por_pagina", "columnas"}, origen)
+    ocr = _tramo(datos, "ocr", {"motor", "min_chars", "dpi", "max_paginas", "idioma", "min_chars_por_pagina", "columnas", "paginas"}, origen)
     cleanup = _tramo(
         datos, "cleanup",
         {"folio_lineas_borde", "repeticion_fraccion", "repeticion_min_paginas",

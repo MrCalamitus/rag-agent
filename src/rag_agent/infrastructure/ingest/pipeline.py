@@ -20,7 +20,7 @@ de credenciales:
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -30,7 +30,7 @@ from .documents import Documento, VetadoError, metadata_de_ruta
 from .extractors import EXTENSIONES, POR_EXTENSION, MINIMO_TEXTO
 from .ocr import MotorOcr, ResultadoOcr, build_motor
 from .ocr import cache as ocr_cache
-from .ocr.rasterize import contar_paginas, rasterizar
+from .ocr.rasterize import contar_paginas, rasterizar, rasterizar_seleccion
 
 REPO = Path(__file__).resolve().parents[4]
 
@@ -94,10 +94,21 @@ def extraer(archivo: Path, profile: Profile, ocr=None) -> Documento | None:
             ocr=ocr,
             min_chars=profile.ocr.min_chars,
             cleanup=profile.cleanup,
+            paginas=profile.ocr.paginas,
         )
         if documento is not None:
             return documento
     return None
+
+
+def _renumerar(resultado: ResultadoOcr, numeros: Sequence[int]) -> None:
+    """Reasigna el número real de página a cada página transcrita."""
+    from dataclasses import replace
+
+    resultado.paginas = [
+        replace(pagina, numero=numeros[indice]) if indice < len(numeros) else pagina
+        for indice, pagina in enumerate(resultado.paginas)
+    ]
 
 
 class Transcriptor:
@@ -122,17 +133,51 @@ class Transcriptor:
         self._cache = carpeta_cache
         self._reporte = reporte
 
-    def __call__(self, ruta: Path) -> ResultadoOcr | None:
-        clave = ocr_cache.clave(ruta, motor=self._motor.nombre, dpi=self._policy.dpi)
+    def __call__(
+        self,
+        ruta: Path,
+        paginas: Sequence[int] | None = None,
+        *,
+        exigir_densidad: bool = True,
+    ) -> ResultadoOcr | None:
+        """Transcribe el documento, o solo las páginas indicadas.
+
+        `exigir_densidad` se apaga cuando la transcripción no es la única fuente
+        sino un refuerzo sobre la capa de texto: ahí una página con pocas
+        palabras es una página con pocas palabras, no una transcripción fallida,
+        y descartarla tiraría las tablas bien extraídas del resto.
+        """
+        seleccion = sorted(set(paginas)) if paginas is not None else None
+        etiqueta = ",".join(map(str, seleccion)) if seleccion is not None else ""
+        clave = ocr_cache.clave(
+            ruta, motor=self._motor.nombre, dpi=self._policy.dpi, seleccion=etiqueta
+        )
         guardado = ocr_cache.leer(self._cache, clave)
         if guardado is not None:
             self._anotar(ruta, guardado, cacheado=True)
-            return self._con_densidad_suficiente(ruta, guardado)
+            return self._con_densidad_suficiente(ruta, guardado, exigir=exigir_densidad)
 
-        imagenes = rasterizar(ruta, dpi=self._policy.dpi, max_paginas=self._policy.max_paginas)
+        if seleccion is None:
+            imagenes = [
+                (numero, png)
+                for numero, png in enumerate(
+                    rasterizar(
+                        ruta, dpi=self._policy.dpi, max_paginas=self._policy.max_paginas
+                    ),
+                    start=1,
+                )
+            ]
+        else:
+            imagenes = rasterizar_seleccion(
+                ruta, seleccion[: self._policy.max_paginas], dpi=self._policy.dpi
+            )
         if not imagenes:
             return None
-        resultado = self._motor.extraer(imagenes, idioma=self._policy.idioma)
+        resultado = self._motor.extraer([png for _, png in imagenes], idioma=self._policy.idioma)
+        # El motor numera 1..N sobre lo que recibió; con una selección salteada
+        # eso no son las páginas del documento. Se renumeran aquí, que es donde
+        # se sabe cuáles se pidieron.
+        _renumerar(resultado, [numero for numero, _ in imagenes])
         if len(resultado.paginas) < len(imagenes):
             # Transcripción incompleta: alguna página se cayó por red o por
             # estrangulamiento del servicio. **No se cachea.** Guardar un
@@ -155,9 +200,11 @@ class Transcriptor:
         # completa y volver a pedirla costaría lo mismo y daría lo mismo.
         ocr_cache.escribir(self._cache, clave, resultado)
         self._anotar(ruta, resultado, cacheado=False)
-        return self._con_densidad_suficiente(ruta, resultado)
+        return self._con_densidad_suficiente(ruta, resultado, exigir=exigir_densidad)
 
-    def _con_densidad_suficiente(self, ruta: Path, resultado: ResultadoOcr) -> ResultadoOcr | None:
+    def _con_densidad_suficiente(
+        self, ruta: Path, resultado: ResultadoOcr, *, exigir: bool = True
+    ) -> ResultadoOcr | None:
         """Descarta la transcripción que salió demasiado pobre para ser evidencia.
 
         Un PDF de catorce páginas del que salen 900 caracteres no se transcribió
@@ -165,6 +212,8 @@ class Transcriptor:
         descartarlo, porque el agente lo citaría con toda propiedad para
         responder algo que ese documento no dice.
         """
+        if not exigir:
+            return resultado
         paginas = len(resultado.paginas) or 1
         densidad = len(resultado.texto.strip()) / paginas
         if densidad >= self._policy.min_chars_por_pagina:

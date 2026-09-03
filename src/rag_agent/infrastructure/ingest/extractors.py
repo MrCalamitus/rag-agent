@@ -28,6 +28,7 @@ from pathlib import Path
 
 from ...domain.profile import CleanupPolicy
 
+from .paginas import seleccionar
 from .documents import Documento, VetadoError, anio_en, clasificar, marcador_vetado, slug
 
 # Líneas de sello, huella o base64: ruido que degrada la recuperación.
@@ -151,13 +152,21 @@ def pdf(
     ocr=None,
     min_chars: int = MINIMO_TEXTO,
     cleanup: CleanupPolicy | None = None,
+    paginas: str = "sin-texto",
     **_,
 ) -> Documento | None:
-    """Texto del PDF: capa nativa, descifrando si hace falta, y OCR como respaldo.
+    """Texto del PDF: capa nativa, descifrando si hace falta, y el motor encima.
 
-    `ocr` es un invocable `Path -> ResultadoOcr | None`. Se le pasa el documento
-    entero y no las páginas ya rasterizadas porque quien lo provee es el
-    pipeline, que es el que sabe del caché y del tope de páginas.
+    `ocr` es un invocable `(Path, selección) -> ResultadoOcr | None`. Se le pasa
+    el documento entero y no las páginas ya rasterizadas porque quien lo provee
+    es el pipeline, que es el que sabe del caché y del tope de páginas.
+
+    `paginas` decide cuándo entra el motor. Históricamente solo entraba si el
+    PDF no daba texto, lo que dejaba fuera al informe financiero nativo: tiene
+    capa de texto completa, pero `pypdf` devuelve sus tablas aplanadas en una
+    columna de cifras sin fila ni encabezado. Con `todas` o `con-tablas` el
+    motor corre también ahí y su versión **sustituye página a página** a la
+    nativa, que es lo que conserva a qué fila y columna pertenece cada valor.
     """
     try:
         from pypdf import PdfReader
@@ -173,17 +182,37 @@ def pdf(
         # documento realmente protegido no debe entrar al corpus a la fuerza.
         lector.decrypt("")
 
-    paginas = [p.extract_text() or "" for p in lector.pages]
-    texto = limpiar(paginas, cleanup)
+    por_pagina = [p.extract_text() or "" for p in lector.pages]
+    texto = limpiar(por_pagina, cleanup)
     origen = "capa de texto"
     confianza = None
+    reforzadas = 0
 
-    if len(texto) < min_chars and ocr is not None:
+    sin_capa = len(texto) < min_chars
+    if ocr is not None and sin_capa:
         transcrito = ocr(ruta)
         if transcrito is not None and len(transcrito.texto.strip()) >= min_chars:
             texto = transcrito.texto.strip()
             origen = f"ocr:{transcrito.motor}"
             confianza = transcrito.confianza
+    elif ocr is not None and paginas in ("todas", "con-tablas"):
+        seleccion = seleccionar(ruta, paginas, total=len(por_pagina))
+        # Sin exigir densidad: aquí la transcripción no es la única fuente sino
+        # un refuerzo, y una página con pocas palabras es eso y no un fallo.
+        transcrito = ocr(ruta, sorted(seleccion), exigir_densidad=False)
+        if transcrito is not None:
+            for pagina in transcrito.paginas:
+                indice = pagina.numero - 1
+                if pagina.texto.strip() and 0 <= indice < len(por_pagina):
+                    por_pagina[indice] = pagina.texto
+                    reforzadas += 1
+            if reforzadas:
+                texto = limpiar(por_pagina, cleanup)
+                origen = (
+                    f"capa de texto + {transcrito.motor} "
+                    f"({reforzadas}/{len(por_pagina)} páginas)"
+                )
+                confianza = transcrito.confianza
 
     if (marcador := marcador_vetado(texto, banned)):
         raise VetadoError(marcador)
@@ -193,7 +222,7 @@ def pdf(
     metadata: dict = {
         "tipo": clasificar(ruta.stem),
         "fuente": ruta.name,
-        "paginas": len(paginas),
+        "paginas": len(por_pagina),
         # De dónde salió el texto viaja con el fragmento: una cita que procede
         # de una transcripción automática no vale lo mismo que una del original,
         # y quien audite la respuesta tiene derecho a saberlo sin abrir el PDF.
@@ -203,6 +232,8 @@ def pdf(
         metadata["cifrado_original"] = True
     if confianza is not None:
         metadata["ocr_confianza"] = confianza
+    if reforzadas:
+        metadata["paginas_con_estructura"] = reforzadas
     if (anio := anio_en(slug(ruta.stem))):
         metadata["anio"] = anio
     return Documento(nombre=f"{slug(ruta.stem)}.md", texto=f"# {ruta.stem}\n\n{texto}\n", metadata=metadata)

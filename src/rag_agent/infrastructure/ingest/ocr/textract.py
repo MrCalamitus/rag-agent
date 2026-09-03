@@ -38,6 +38,7 @@ valores distintos.
 from __future__ import annotations
 
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Any
 
@@ -96,6 +97,13 @@ CABECERA_LARGO_MAX = 30
 CABECERA_FILAS_MIN = 3
 
 
+# Páginas simultáneas contra Textract. AnalyzeDocument admite bastante más,
+# pero cada llamada sube un PNG de ~1,5 MB: por encima de esto el cuello deja de
+# ser la API y pasa a ser la subida, y el reintento adaptativo de botocore ya
+# absorbe el estrangulamiento ocasional.
+CONCURRENCIA = 8
+
+
 @dataclass(frozen=True)
 class Mancha:
     """Lo que hay dibujado en una celda sin texto."""
@@ -150,9 +158,11 @@ class TextractOcr:
         region: str | None = None,
         profile: str | None = None,
         columnas: str = "columnas",
+        concurrencia: int = CONCURRENCIA,
     ) -> None:
         self._dpi = dpi
         self._columnas = columnas
+        self._concurrencia = concurrencia
         self._region = region
         self._profile = profile
         self._cliente: Any | None = None
@@ -179,14 +189,41 @@ class TextractOcr:
         return total
 
     def extraer(self, imagenes: list[bytes], *, idioma: str = "spa") -> ResultadoOcr:
+        """Transcribe las páginas, varias a la vez.
+
+        Secuencialmente son ~5 segundos por página, casi todos de espera de red:
+        un trimestral de 85 páginas tarda ocho minutos y un lote de veinticuatro
+        se va a más de tres horas. Como cada página es una llamada independiente,
+        el paralelismo es reparto de espera, no carga sobre la máquina.
+
+        El orden del resultado es el de entrada y no el de llegada: `_pagina`
+        numera por posición, y ordenar por quién respondió antes mezclaría el
+        texto de una página con el número de otra.
+        """
         resultado = ResultadoOcr(motor=self.nombre)
-        for numero, imagen in enumerate(imagenes, start=1):
-            try:
-                respuesta = self._analizar(imagen)
-            except Exception as exc:  # noqa: BLE001 - una página mala no tumba el documento
-                resultado.avisos.append(f"página {numero}: {type(exc).__name__}: {exc}")
-                continue
-            resultado.paginas.append(_pagina(respuesta, imagen, numero, self._columnas))
+        if not imagenes:
+            return resultado
+
+        # El cliente se crea aquí y no dentro de los hilos: boto3 es seguro para
+        # usar en paralelo, pero construirlo a la vez desde varios no lo es.
+        self._boto()
+        obreros = max(1, min(self._concurrencia, len(imagenes)))
+        paginas: dict[int, PaginaExtraida] = {}
+        with ThreadPoolExecutor(max_workers=obreros) as pool:
+            futuros = {
+                pool.submit(self._analizar, imagen): (numero, imagen)
+                for numero, imagen in enumerate(imagenes, start=1)
+            }
+            for futuro in as_completed(futuros):
+                numero, imagen = futuros[futuro]
+                try:
+                    respuesta = futuro.result()
+                except Exception as exc:  # noqa: BLE001 - una página mala no tumba el documento
+                    resultado.avisos.append(f"página {numero}: {type(exc).__name__}: {exc}")
+                    continue
+                paginas[numero] = _pagina(respuesta, imagen, numero, self._columnas)
+
+        resultado.paginas = [paginas[n] for n in sorted(paginas)]
         return resultado
 
     # -- interno --------------------------------------------------------

@@ -9,6 +9,7 @@ ghostscript en la máquina de quien prepara el corpus.
 from __future__ import annotations
 
 import io
+from collections.abc import Sequence
 from pathlib import Path
 
 # Un PNG de página a 200 ppp ronda 1,5 MB. Los motores en la nube suelen
@@ -37,6 +38,35 @@ def rasterizar(ruta: Path, *, dpi: int = 200, max_paginas: int = 40) -> list[byt
         for indice in range(min(len(documento), max_paginas)):
             imagen = documento[indice].render(scale=dpi / 72).to_pil()
             paginas.append(_a_png(imagen))
+        return paginas
+    finally:
+        documento.close()
+
+
+def rasterizar_seleccion(
+    ruta: Path, numeros: Sequence[int], *, dpi: int = 200
+) -> list[tuple[int, bytes]]:
+    """Rasteriza solo las páginas indicadas, 1-indexadas.
+
+    Devuelve pares `(número de página, PNG)`. El número viaja con la imagen
+    porque quien las recibe ya no puede deducirlo: con una selección salteada,
+    la posición en la lista no es la página del documento, y perder esa
+    correspondencia mezclaría el texto de una página con el de otra.
+    """
+    try:
+        import pypdfium2 as pdfium
+    except ImportError:  # pragma: no cover - depende del entorno
+        raise SystemExit(falta_dependencia("pypdfium2")) from None
+
+    documento = pdfium.PdfDocument(str(ruta))
+    try:
+        total = len(documento)
+        paginas: list[tuple[int, bytes]] = []
+        for numero in sorted(set(numeros)):
+            if not 1 <= numero <= total:
+                continue
+            imagen = documento[numero - 1].render(scale=dpi / 72).to_pil()
+            paginas.append((numero, _a_png(imagen)))
         return paginas
     finally:
         documento.close()

@@ -143,13 +143,33 @@ class OcrPolicy:
     # módulo de extracción no puede saberlo, y hasta ahora decía «versiones»
     # siempre, que en una tabla financiera es sencillamente falso.
     columnas: str = "columnas"
+    # Qué páginas pasan por el motor. El supuesto original —«necesita motor» ⇔
+    # «no tiene capa de texto»— es falso para un informe financiero nativo: su
+    # capa de texto existe y es completa, pero aplana las tablas y deja una
+    # columna de cifras sin fila ni encabezado, que es peor que no tenerlas.
+    #
+    # - `sin-texto`   solo cuando el PDF no da texto. El comportamiento histórico.
+    # - `todas`       toda página, aunque haya capa de texto. Para corpus donde
+    #                 casi cada página lleva tabla: evita decidir y no puede
+    #                 perder ninguna.
+    # - `con-tablas`  solo las páginas donde se detectan tablas. Ahorra en
+    #                 documentos mayoritariamente narrativos, a cambio de que un
+    #                 fallo del detector pierda una tabla en silencio. Requiere
+    #                 la extra `deteccion`.
+    paginas: str = "sin-texto"
 
     MOTORES = ("ninguno", "tablas", "texto")
+    PAGINAS = ("sin-texto", "todas", "con-tablas")
 
     def __post_init__(self) -> None:
         if self.motor not in self.MOTORES:
             raise ValueError(
                 f"motor de OCR desconocido: '{self.motor}'. Válidos: {list(self.MOTORES)}"
+            )
+        if self.paginas not in self.PAGINAS:
+            raise ValueError(
+                f"selección de páginas desconocida: '{self.paginas}'. "
+                f"Válidas: {list(self.PAGINAS)}"
             )
         if self.dpi < 72:
             raise ValueError("dpi por debajo de 72 no deja texto legible")
@@ -165,6 +185,11 @@ class OcrPolicy:
     @property
     def conserva_tablas(self) -> bool:
         return self.motor == "tablas"
+
+    @property
+    def sobre_capa_de_texto(self) -> bool:
+        """¿El motor corre también en PDFs que sí tienen texto extraíble?"""
+        return self.activo and self.paginas in ("todas", "con-tablas")
 
 
 @dataclass(frozen=True)
