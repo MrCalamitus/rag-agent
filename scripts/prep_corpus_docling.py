@@ -28,7 +28,12 @@ sys.path.insert(0, str(RAIZ / "src"))
 sys.path.insert(0, str(RAIZ / "scripts"))
 
 from lab import docling_extractor  # noqa: E402
-from rag_agent.infrastructure.ingest import DestinoInvalido, escribir, preparar  # noqa: E402
+from rag_agent.infrastructure.ingest import (  # noqa: E402
+    DestinoInvalido,
+    Reporte,
+    escribir,
+    preparar,
+)
 from rag_agent.infrastructure.ingest.extractors import EXTENSIONES  # noqa: E402
 from rag_agent.infrastructure.profiles import ProfileError, load_profiles  # noqa: E402
 
@@ -92,14 +97,41 @@ def main() -> int:
 
     docling_extractor.instalar(do_ocr=args.docling_ocr)
 
-    reporte = preparar(
-        origen,
-        binding.profile,
-        patrones=tuple(args.only),
-        omitir=tuple(args.skip),
-        carpeta_cache=destino.parent / ".ocr-cache",
-        ocr=args.textract_fallback,
-    )
+    archivos = _archivos(origen, tuple(args.only))
+    if not archivos:
+        print("❌ Ningún archivo coincide con --only.", file=sys.stderr)
+        return 1
+
+    reporte = Reporte()
+    for indice, archivo in enumerate(archivos, start=1):
+        print(f"  [{indice}/{len(archivos)}] {archivo.name}", end="", flush=True)
+        parcial = preparar(
+            origen,
+            binding.profile,
+            # Un documento por llamada. `preparar` recorre la carpeta entera y
+            # `escribir` vuelca al final, que con pypdf eran segundos y aquí son
+            # media hora sin una sola señal de vida. Acotarlo a un archivo
+            # convierte el mismo código en un pipeline incremental sin tocarlo.
+            patrones=(archivo.relative_to(origen).as_posix(),),
+            omitir=tuple(args.skip),
+            carpeta_cache=destino.parent / ".ocr-cache",
+            ocr=args.textract_fallback,
+        )
+        _acumular(reporte, parcial)
+        medida = docling_extractor.MEDICIONES.get(str(archivo), {})
+        segundos = medida.get("segundos")
+        detalle = f" {segundos}s" if segundos is not None else ""
+        if parcial.fragmentos and not args.dry_run:
+            try:
+                escribir(parcial, destino, binding.profile)
+            except DestinoInvalido as exc:
+                print(f"\n❌ {exc}", file=sys.stderr)
+                return 1
+        estado = (
+            f"{len(parcial.fragmentos)} fragmento(s)" if parcial.fragmentos else "sin texto"
+        )
+        print(f"{detalle}  → {estado}", flush=True)
+    print()
 
     for nombre, marcador in reporte.vetados:
         print(f"  ⛔ {nombre}: contiene «{marcador}» → EXCLUIDO por el perfil")
@@ -125,6 +157,8 @@ def main() -> int:
         print(f"\n(dry-run) {reporte.documentos} documento(s) → {reporte.total_fragmentos} fragmento(s).")
         return 0
 
+    # Los .md ya están en disco desde su documento. Esta pasada solo rehace el
+    # manifiesto, que necesita el lote completo para tener todas sus columnas.
     try:
         escribir(reporte, destino, binding.profile)
     except DestinoInvalido as exc:
@@ -153,6 +187,20 @@ def main() -> int:
     )
     print(f"Siguiente paso:  python scripts/compare_corpus.py --a {base_destino or '<corpus actual>'} --b {destino}")
     return 0
+
+
+def _archivos(origen: Path, patrones: tuple[str, ...]) -> list[Path]:
+    """Los archivos a procesar, en el mismo orden que usaría `preparar`."""
+    encontrados = {a for patron in patrones for a in origen.rglob(patron) if a.is_file()}
+    return sorted(encontrados)
+
+
+def _acumular(total: Reporte, parcial: Reporte) -> None:
+    """Suma el reporte de un documento al del lote."""
+    total.fragmentos.extend(parcial.fragmentos)
+    total.documentos += parcial.documentos
+    for campo in ("vetados", "sin_texto", "omitidos", "errores", "transcritos", "avisos"):
+        getattr(total, campo).extend(getattr(parcial, campo))
 
 
 def _resumen_docling() -> None:

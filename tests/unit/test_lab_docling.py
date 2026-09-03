@@ -113,7 +113,9 @@ def test_un_pdf_sin_texto_util_se_descarta_igual_que_en_produccion(monkeypatch, 
 
     assert docling_extractor.pdf_docling(pdf) is None
     # Y aun así queda medido: lo que no produjo texto también es un resultado.
-    assert docling_extractor.MEDICIONES["escaneo.pdf"]["caracteres"] == len("dos palabras")
+    medida = docling_extractor.MEDICIONES[str(pdf)]
+    assert medida["caracteres"] == len("dos palabras")
+    assert medida["archivo"] == "escaneo.pdf"
 
 
 def test_el_veto_del_perfil_sigue_mandando(monkeypatch, tmp_path):
@@ -144,3 +146,15 @@ def test_instalar_deja_el_pipeline_recorriendo_el_corpus_con_docling(monkeypatch
     assert reporte.fragmentos[0].metadata["fuente"] == "mazda2-2026.pdf"
     # `clase` la pone el pipeline, no el extractor: sigue viajando.
     assert "clase" in reporte.fragmentos[0].metadata
+
+
+def test_dos_fichas_con_el_mismo_nombre_se_miden_por_separado(monkeypatch, tmp_path):
+    """Indexar por nombre colapsaba las homónimas y escondía un documento."""
+    _con_convertidor(monkeypatch, TABLA)
+    for marca in ("marca-a", "marca-b"):
+        (tmp_path / marca).mkdir()
+        (tmp_path / marca / "ficha.pdf").write_bytes(b"%PDF")
+        docling_extractor.pdf_docling(tmp_path / marca / "ficha.pdf")
+
+    assert len(docling_extractor.MEDICIONES) == 2
+    assert {m["archivo"] for m in docling_extractor.MEDICIONES.values()} == {"ficha.pdf"}

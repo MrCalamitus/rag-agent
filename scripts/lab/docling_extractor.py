@@ -103,8 +103,11 @@ def pdf_docling(
             origen = f"ocr:{transcrito.motor}"
             confianza = transcrito.confianza
 
-    MEDICIONES[ruta.name] = {
+    # Se indexa por ruta y no por nombre: dos marcas pueden llamar igual a su
+    # ficha, y contarlas como una escondía un documento del reporte.
+    MEDICIONES[str(ruta)] = {
         "archivo": ruta.name,
+        "ruta": str(ruta),
         "segundos": round(segundos, 2),
         "paginas": paginas,
         "caracteres": len(texto),

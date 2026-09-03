@@ -465,10 +465,25 @@ es lo que de verdad se quería.
 
 Tres detalles que costaron y conviene no volver a descubrir:
 
-- **Una sola pasada por el documento.** La primera versión buscaba cada aguja
-  recorriendo el PDF entero; sobre un manual de 440 páginas eso es la diferencia
-  entre un segundo y un minuto con el visor en blanco. Ahora se extrae el texto
-  de cada página una vez y se prueban todas las agujas contra ella.
+- **Se marca la región, no una frase.** La primera versión buscaba una sola
+  «aguja» y, cuando el arranque del fragmento no casaba con la capa de texto,
+  caía en la línea más larga del fragmento. En una tabla de especificaciones eso
+  es lotería: ante *«¿qué potencia tiene la Sienna?»* subrayó la fila del sistema
+  de tracción, que era la más larga y no tenía nada que ver. Un fragmento es una
+  **región** del documento, así que ahora se buscan todas sus líneas y se
+  resaltan las que aparezcan en la página.
+- **Gana la página con más líneas del fragmento**, no la primera con alguna: una
+  línea suelta de texto legal se repite en varias páginas y arrastraba el visor a
+  la equivocada.
+- **Las líneas sin palabras no se buscan.** Una celda con `180` acierta en veinte
+  sitios que no son el bueno, así que solo entran líneas de al menos 14
+  caracteres con alguna palabra real. Consecuencia visible: en una tabla se
+  marcan las filas —«Potencia Total del Sistema Híbrido HSD»— y no las celdas que
+  son solo la cifra. La cifra queda dentro de la fila marcada, al lado.
+- **Una sola pasada por el documento.** Recorrer el PDF una vez por línea
+  multiplicaría el coste por cuarenta; sobre un manual de 440 páginas es la
+  diferencia entre un segundo y un visor congelado. Se extrae el texto de cada
+  página una vez y se prueban todas las líneas contra ella.
 - **Los pintados se encadenan.** pdf.js rechaza dos `render()` sobre el mismo
   canvas —*"Cannot use the same canvas during multiple render() operations"*— y
   `cancel()` no basta, porque cancelar pide el fin pero no lo espera. Abrir un

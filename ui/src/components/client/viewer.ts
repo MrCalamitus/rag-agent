@@ -16,17 +16,18 @@ pdfjs.GlobalWorkerOptions.workerSrc = new URL(
 ).href;
 
 /**
- * Cuánto del fragmento se usa como aguja.
+ * Longitud mínima de una línea para buscarla.
  *
- * Un fragmento puede tener 2000 caracteres y cruzar un salto de página o una
- * columna, y entonces no coincide con nada aunque esté delante. Un arranque
- * corto casi siempre cae dentro de una misma línea de la capa de texto.
+ * Por debajo, las coincidencias son casualidad: en una ficha técnica abundan las
+ * celdas con dos palabras que aparecen en veinte sitios distintos.
  */
-const AGUJA_MAX = 90;
+const MIN_LINEA = 14;
 
 interface Marca {
   page: number;
   items: number[];
+  /** Cuántas líneas del fragmento aparecen en esta página. Ordena los saltos. */
+  aciertos: number;
 }
 
 interface Estado {
@@ -132,7 +133,7 @@ export async function openDocument(url: string, nombre: string, fragmento: strin
       // Honesto: se abre igual, pero diciendo que no se pudo situar la cita.
       // El fragmento pudo cruzar un salto de página, o el PDF puede tener el
       // texto en una capa que no coincide con lo que extrajo la ingesta.
-      estado.marcas = [{ page: 1, items: [] }];
+      estado.marcas = [{ page: 1, items: [], aciertos: 0 }];
       ui.estado.textContent = "No se pudo localizar la cita; se abre la primera página.";
     }
     await pintar();
@@ -182,24 +183,37 @@ function normalizar(texto: string): string {
  * con eso, una coincidencia en la cadena se traduce a los pedazos que hay que
  * marcar.
  */
+/**
+ * Dónde está el fragmento y qué hay que marcar.
+ *
+ * Un fragmento es una **región** del documento, no una frase, así que se marca
+ * entera: se buscan todas sus líneas y se resaltan las que aparezcan en la
+ * página. La versión anterior buscaba una sola aguja y, cuando el arranque del
+ * fragmento no casaba, caía en la línea más larga — que en una tabla de
+ * especificaciones es lotería: ante una pregunta por la potencia subrayaba la
+ * fila del sistema de tracción, que era la más larga y no tenía nada que ver.
+ *
+ * Y se elige la página que contiene MÁS líneas del fragmento, no la primera que
+ * contiene alguna: una línea suelta de texto legal se repite en varias páginas y
+ * arrastraba el visor a la equivocada.
+ */
 async function buscar(
   doc: PDFDocumentProxy,
   fragmento: string,
   avisar: (pagina: number) => void,
 ): Promise<Marca[]> {
-  const candidatas = agujas(fragmento);
-  if (candidatas.length === 0) return [];
+  const lineas = lineasDeCita(fragmento);
+  if (lineas.length === 0) return [];
 
-  // Una sola pasada por el documento, probando todas las agujas en cada página.
-  // La versión ingenua —una pasada por aguja— multiplicaba por cinco el coste, y
-  // sobre un manual de 440 páginas eso es la diferencia entre un segundo y un
-  // minuto largo con el visor en blanco.
-  const marcas: Marca[] = [];
+  const encontradas: Marca[] = [];
   for (let numero = 1; numero <= doc.numPages; numero += 1) {
     avisar(numero);
     const pagina = await doc.getPage(numero);
     const contenido = await pagina.getTextContent();
 
+    // Una sola extracción por página, con todas las líneas probadas contra
+    // ella. Recorrer el documento una vez por línea multiplicaría el coste por
+    // cuarenta, y sobre un manual de 440 páginas eso es un visor congelado.
     let plano = "";
     const inicios: number[] = [];
     for (const item of contenido.items) {
@@ -207,57 +221,55 @@ async function buscar(
       plano += `${normalizar("str" in item ? item.str : "")} `;
     }
 
-    for (const aguja of candidatas) {
-      const encontradas = enPagina(plano, inicios, aguja, numero);
-      if (encontradas.length > 0) {
-        // La primera aguja que acierta en esta página manda: están ordenadas de
-        // más específica a más tolerante.
-        marcas.push(...encontradas);
-        break;
-      }
+    const items = new Set<number>();
+    let aciertos = 0;
+    for (const linea of lineas) {
+      const tocados = itemsQueContienen(plano, inicios, linea);
+      if (tocados.length === 0) continue;
+      aciertos += 1;
+      for (const indice of tocados) items.add(indice);
     }
-    if (marcas.length >= 20) break;
-  }
-  return marcas;
-}
 
-function enPagina(plano: string, inicios: number[], aguja: string, numero: number): Marca[] {
-  const marcas: Marca[] = [];
-  let desde = plano.indexOf(aguja);
-  while (desde !== -1) {
-    const hasta = desde + aguja.length;
-    const items: number[] = [];
-    for (let i = 0; i < inicios.length; i += 1) {
-      const fin = i + 1 < inicios.length ? inicios[i + 1] : plano.length;
-      if (inicios[i] < hasta && fin > desde) items.push(i);
+    if (aciertos > 0) {
+      encontradas.push({ page: numero, items: [...items].sort((a, b) => a - b), aciertos });
     }
-    marcas.push({ page: numero, items });
-    desde = plano.indexOf(aguja, hasta);
+    // Una página que contiene el fragmento entero no la va a mejorar ninguna.
+    if (aciertos === lineas.length) break;
   }
-  return marcas;
+
+  return encontradas.sort((a, b) => b.aciertos - a.aciertos || a.page - b.page);
 }
 
 /**
- * Qué buscar, de lo más específico a lo más tolerante.
+ * Las líneas del fragmento que vale la pena buscar.
  *
- * El arranque del fragmento va primero porque es lo que el lector acaba de ver
- * en el panel. Pero un fragmento puede empezar con el encabezado que puso la
- * ingesta —`# ficha-tecnica-hilux`, que no está en el PDF— así que después se
- * prueban sus líneas más largas: son las que tienen más posibilidades de caer
- * enteras dentro de una línea de la capa de texto.
+ * Se descartan las cortas y las que no tienen palabras: en una ficha técnica
+ * abundan las celdas con un `•` o un número suelto, y buscar «180» acierta en
+ * media docena de sitios que no son el bueno.
  */
-function agujas(fragmento: string): string[] {
-  const plano = normalizar(fragmento);
-  const candidatas = [plano.slice(0, AGUJA_MAX), plano.slice(0, 45)];
-
+function lineasDeCita(fragmento: string): string[] {
   const lineas = fragmento
     .split("\n")
     .map((linea) => normalizar(linea))
-    .filter((linea) => linea.length >= 25 && /[a-z]{4}/.test(linea))
-    .sort((a, b) => b.length - a.length);
-  candidatas.push(...lineas.slice(0, 4).map((linea) => linea.slice(0, AGUJA_MAX)));
+    .filter((linea) => linea.length >= MIN_LINEA && /[a-z]{4}/.test(linea));
 
-  return [...new Set(candidatas.map((c) => c.trim()).filter((c) => c.length >= 12))];
+  // Tope por coste: el fragmento más largo del corpus ronda las 60 líneas y
+  // cada una se prueba contra cada página.
+  return [...new Set(lineas)].slice(0, 60);
+}
+
+/** Índices de los trozos de la capa de texto que cubre una línea. */
+function itemsQueContienen(plano: string, inicios: number[], linea: string): number[] {
+  const desde = plano.indexOf(linea);
+  if (desde === -1) return [];
+  const hasta = desde + linea.length;
+
+  const items: number[] = [];
+  for (let i = 0; i < inicios.length; i += 1) {
+    const fin = i + 1 < inicios.length ? inicios[i + 1] : plano.length;
+    if (inicios[i] < hasta && fin > desde) items.push(i);
+  }
+  return items;
 }
 
 /* --- Pintado --------------------------------------------------------------- */
@@ -340,7 +352,8 @@ async function pintarPagina(): Promise<void> {
   ui.previo.hidden = !varias;
   ui.siguiente.hidden = !varias;
   ui.cuenta.textContent = conCita
-    ? `Cita ${estado.actual + 1} de ${estado.marcas.length} · página ${marca.page}`
+    ? `Página ${marca.page}` +
+      (estado.marcas.length > 1 ? ` · coincidencia ${estado.actual + 1} de ${estado.marcas.length}` : "")
     : `Página ${marca.page}`;
 }
 
