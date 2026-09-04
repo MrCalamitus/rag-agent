@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
 
 from ...domain.chunking import chunk_document_id, split
@@ -50,7 +51,12 @@ class Fragmento:
 
 @dataclass
 class Reporte:
+    # `fragmentos` solo se llena cuando alguien pide el lote entero de golpe
+    # (`preparar`). En el camino incremental queda vacío a propósito: los
+    # fragmentos ya están en disco y retenerlos aquí sería guardar el corpus
+    # dos veces, una en el sistema de archivos y otra en memoria.
     fragmentos: list[Fragmento] = field(default_factory=list)
+    emitidos: int = 0
     documentos: int = 0
     vetados: list[tuple[str, str]] = field(default_factory=list)
     sin_texto: list[tuple[str, str]] = field(default_factory=list)
@@ -62,7 +68,7 @@ class Reporte:
 
     @property
     def total_fragmentos(self) -> int:
-        return len(self.fragmentos)
+        return self.emitidos or len(self.fragmentos)
 
 
 class DestinoInvalido(ValueError):
@@ -354,17 +360,43 @@ def _fragmentar(documento: Documento, profile: Profile, extra: dict) -> Iterator
         )
 
 
-def preparar(
+@dataclass
+class Avance:
+    """Lo que se sabe de un documento en cuanto termina de procesarse.
+
+    Es la unidad del camino incremental: quien llama recibe esto y decide —
+    escribirlo, imprimirlo, ambas cosas— sin esperar a que el lote acabe. Un
+    documento que no dio fragmentos también avanza, con su motivo, porque un
+    lote largo tiene que decir por qué descarta cosas mientras las descarta y
+    no media hora después.
+    """
+
+    archivo: Path
+    indice: int
+    total: int
+    estado: str  # ok | vetado | error | sin_texto | omitido
+    fragmentos: list[Fragmento] = field(default_factory=list)
+    detalle: str = ""
+
+
+def preparar_stream(
     origen: Path,
     profile: Profile,
     *,
+    reporte: Reporte,
     patrones: tuple[str, ...] = tuple(f"*{ext}" for ext in EXTENSIONES),
     omitir: tuple[str, ...] = (),
     carpeta_cache: Path | None = None,
     ocr: bool = True,
-) -> Reporte:
-    """Recorre el origen y produce los fragmentos, sin escribir nada todavía."""
-    reporte = Reporte()
+) -> Iterator[Avance]:
+    """Recorre el origen y va soltando cada documento en cuanto está listo.
+
+    El `reporte` se recibe ya construido y se va rellenando: quien consume el
+    generador puede mirarlo entre documento y documento —para imprimir los
+    avisos nuevos del transcriptor, por ejemplo— y al terminar lo tiene
+    completo. Lo que **no** se acumula ahí son los fragmentos: van en el
+    `Avance` y quien los quiera guardados que los guarde.
+    """
     transcriptor = None
     if ocr and profile.ocr.activo:
         motor = build_motor(profile.ocr)
@@ -377,29 +409,36 @@ def preparar(
             reporte.avisos.append(f"OCR desactivado: {motivo}")
     descartados = {a for patron in omitir for a in origen.rglob(patron)}
 
-    for archivo in _archivos(origen, patrones):
+    archivos = [a for a in _archivos(origen, patrones) if not a.name.endswith(".metadata.json")]
+    total = len(archivos)
+
+    for indice, archivo in enumerate(archivos, start=1):
+        avance = partial(Avance, archivo=archivo, indice=indice, total=total)
         if archivo in descartados:
             reporte.omitidos.append((archivo.name, "descartado por --skip"))
-            continue
-        if archivo.name.endswith(".metadata.json"):
+            yield avance(estado="omitido", detalle="descartado por --skip")
             continue
         # Si existe el XML firmado del mismo documento, ese manda: el PDF trae
         # el mismo dato entre sellos en base64.
         if archivo.suffix.lower() == ".pdf" and archivo.with_suffix(".xml").exists():
             reporte.omitidos.append((archivo.name, "se usa su XML firmado"))
+            yield avance(estado="omitido", detalle="se usa su XML firmado")
             continue
 
         try:
             documento = extraer(archivo, profile, transcriptor)
         except VetadoError as veto:
             reporte.vetados.append((archivo.name, str(veto)))
+            yield avance(estado="vetado", detalle=str(veto))
             continue
         except Exception as exc:  # noqa: BLE001 - un archivo roto no tumba el lote
             # Con un corpus de decenas de PDFs de origen desconocido, alguno
             # estará cifrado, truncado o no será lo que su extensión dice. Que
             # eso aborte las otras 130 conversiones es el peor comportamiento
             # posible: se reporta y se sigue.
-            reporte.errores.append((archivo.name, f"{type(exc).__name__}: {exc}"))
+            detalle = f"{type(exc).__name__}: {exc}"
+            reporte.errores.append((archivo.name, detalle))
+            yield avance(estado="error", detalle=detalle)
             continue
         if documento is None:
             # Distinguir ambos casos importa: un PDF escaneado se arregla con
@@ -415,6 +454,7 @@ def preparar(
                 else f"ningún extractor reconoce este {archivo.suffix.lstrip('.')} → conviértelo o usa --skip"
             )
             reporte.sin_texto.append((archivo.name, motivo))
+            yield avance(estado="sin_texto", detalle=motivo)
             continue
 
         reporte.documentos += 1
@@ -429,40 +469,116 @@ def preparar(
             tipo=str(documento.metadata.get("tipo", "")),
             texto=documento.texto,
         )
-        reporte.fragmentos.extend(_fragmentar(documento, profile, extra))
+        fragmentos = list(_fragmentar(documento, profile, extra))
+        reporte.emitidos += len(fragmentos)
+        yield avance(estado="ok", fragmentos=fragmentos)
 
+
+def preparar(
+    origen: Path,
+    profile: Profile,
+    *,
+    patrones: tuple[str, ...] = tuple(f"*{ext}" for ext in EXTENSIONES),
+    omitir: tuple[str, ...] = (),
+    carpeta_cache: Path | None = None,
+    ocr: bool = True,
+) -> Reporte:
+    """Recorre el origen y produce los fragmentos, sin escribir nada todavía.
+
+    El lote entero en memoria. Sigue siendo lo cómodo para las pruebas y para
+    un corpus pequeño; para uno grande está `preparar_stream`, que es lo mismo
+    sin retenerlo.
+    """
+    reporte = Reporte()
+    for avance in preparar_stream(
+        origen,
+        profile,
+        reporte=reporte,
+        patrones=patrones,
+        omitir=omitir,
+        carpeta_cache=carpeta_cache,
+        ocr=ocr,
+    ):
+        reporte.fragmentos.extend(avance.fragmentos)
     return reporte
+
+
+@dataclass
+class _Fila:
+    """Lo que el manifiesto necesita de un fragmento ya escrito."""
+
+    document_id: str
+    metadata: dict
+    caracteres: int
+
+
+class Escritor:
+    """Vuelca el corpus documento a documento, y cierra con el manifiesto.
+
+    Solo retiene los metadatos —unas cuantas claves cortas por fragmento—
+    porque el manifiesto no puede escribir su cabecera hasta conocer todas las
+    columnas del lote. Los textos, que son lo que pesa, se van a disco y se
+    sueltan.
+    """
+
+    def __init__(self, destino: Path, profile: Profile) -> None:
+        # La validación va antes de crear nada: el punto de la regla es que un
+        # destino prohibido no llegue a existir. La carpeta, en cambio, se crea
+        # al primer fragmento: un lote que no produjo nada tampoco deja una
+        # carpeta vacía sugiriendo que sí.
+        validar_destino(destino, profile)
+        self.destino = destino
+        self._filas: list[_Fila] = []
+        self._creado = False
+
+    def _asegurar(self) -> None:
+        if not self._creado:
+            self.destino.mkdir(parents=True, exist_ok=True)
+            self._creado = True
+
+    def anadir(self, fragmentos: Sequence[Fragmento]) -> None:
+        import json
+
+        if fragmentos:
+            self._asegurar()
+        for fragmento in fragmentos:
+            (self.destino / fragmento.nombre).write_text(fragmento.texto, encoding="utf-8")
+            (self.destino / f"{fragmento.nombre}.metadata.json").write_text(
+                json.dumps(
+                    {"metadataAttributes": fragmento.metadata}, ensure_ascii=False, indent=2
+                ),
+                encoding="utf-8",
+            )
+            self._filas.append(
+                _Fila(fragmento.document_id, fragmento.metadata, len(fragmento.texto))
+            )
+
+    def cerrar(self) -> None:
+        self._asegurar()
+        _manifiesto(self._filas, self.destino)
 
 
 def escribir(reporte: Reporte, destino: Path, profile: Profile) -> None:
     """Vuelca los fragmentos y el manifiesto. Valida el destino antes de tocar disco."""
-    import json
-
-    validar_destino(destino, profile)
-    destino.mkdir(parents=True, exist_ok=True)
-    for fragmento in reporte.fragmentos:
-        (destino / fragmento.nombre).write_text(fragmento.texto, encoding="utf-8")
-        (destino / f"{fragmento.nombre}.metadata.json").write_text(
-            json.dumps({"metadataAttributes": fragmento.metadata}, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-    _manifiesto(reporte, destino)
+    escritor = Escritor(destino, profile)
+    escritor.anadir(reporte.fragmentos)
+    escritor.cerrar()
 
 
-def _manifiesto(reporte: Reporte, destino: Path) -> None:
+def _manifiesto(filas: Sequence[_Fila], destino: Path) -> None:
     """Índice plano del corpus. Es lo que se revisa antes de subir nada a S3."""
     columnas = ["document_id", "tipo", "anio", "fuente", "caracteres"]
     extra = sorted(
-        {k for f in reporte.fragmentos for k in f.metadata} - set(columnas) - {"fragmentos_totales"}
+        {k for f in filas for k in f.metadata} - set(columnas) - {"fragmentos_totales"}
     )
     lineas = [",".join(columnas + extra)]
-    for f in reporte.fragmentos:
+    for f in filas:
         valores = [
             f.document_id,
             str(f.metadata.get("tipo", "")),
             str(f.metadata.get("anio", "")),
             str(f.metadata.get("fuente", "")),
-            str(len(f.texto)),
+            str(f.caracteres),
         ] + [str(f.metadata.get(k, "")) for k in extra]
         lineas.append(",".join(f'"{v}"' if "," in v else v for v in valores))
     (destino / "manifiesto.csv").write_text("\n".join(lineas) + "\n", encoding="utf-8")

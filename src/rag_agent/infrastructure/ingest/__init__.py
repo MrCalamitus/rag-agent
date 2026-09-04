@@ -1,9 +1,21 @@
 from .documents import Documento, VetadoError, marcador_vetado, metadata_de_ruta, slug
-from .pipeline import DestinoInvalido, Fragmento, Reporte, escribir, preparar, validar_destino
+from .pipeline import (
+    Avance,
+    DestinoInvalido,
+    Escritor,
+    Fragmento,
+    Reporte,
+    escribir,
+    preparar,
+    preparar_stream,
+    validar_destino,
+)
 
 __all__ = [
+    "Avance",
     "Documento",
     "DestinoInvalido",
+    "Escritor",
     "Fragmento",
     "Reporte",
     "VetadoError",
@@ -11,6 +23,7 @@ __all__ = [
     "marcador_vetado",
     "metadata_de_ruta",
     "preparar",
+    "preparar_stream",
     "slug",
     "validar_destino",
 ]

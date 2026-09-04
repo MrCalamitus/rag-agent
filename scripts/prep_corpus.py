@@ -6,7 +6,15 @@
 
 La lógica vive en `rag_agent.infrastructure.ingest`: es la misma que usa el menú
 interactivo, y así se prueba una sola vez. Este archivo es la línea de comandos
-y nada más — resuelve el perfil, decide origen y destino, e imprime el reporte.
+y nada más — resuelve el perfil, decide origen y destino, e informa.
+
+Va documento por documento: cada uno se escribe y se reporta en cuanto termina,
+sin esperar al lote. Un corpus de doscientos PDF con transcripción tarda horas,
+y guardarlo entero en memoria para volcarlo al final tenía dos problemas —
+ninguna señal de vida mientras corre, y un Ctrl-C o un fallo a la página 190 se
+llevaba por delante las 189 conversiones que ya estaban hechas. Lo único que
+espera al final es `manifiesto.csv`, cuya cabecera necesita las columnas de
+todo el lote.
 
 Sin `--source` / `--out` se toman los declarados en `profiles/<perfil>.yaml`,
 que es el camino normal: el perfil ya sabe dónde están sus documentos.
@@ -21,7 +29,12 @@ from pathlib import Path
 RAIZ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RAIZ / "src"))
 
-from rag_agent.infrastructure.ingest import DestinoInvalido, escribir, preparar  # noqa: E402
+from rag_agent.infrastructure.ingest import (  # noqa: E402
+    DestinoInvalido,
+    Escritor,
+    Reporte,
+    preparar_stream,
+)
 from rag_agent.infrastructure.ingest.extractors import EXTENSIONES  # noqa: E402
 from rag_agent.infrastructure.ingest.pipeline import escanear_ocr  # noqa: E402
 from rag_agent.infrastructure.profiles import ProfileError, load_profiles  # noqa: E402
@@ -93,30 +106,34 @@ def main() -> int:
     if usar_ocr and not _confirmar_ocr(origen, binding, carpeta_cache, asumir_si=args.yes or args.dry_run):
         usar_ocr = False
 
-    reporte = preparar(
+    reporte = Reporte()
+    # El destino se valida y se abre ANTES de procesar nada: descubrir que la
+    # carpeta estaba prohibida después de media hora de transcripciones sería
+    # tirar el trabajo, y ahora el trabajo se va escribiendo según sale.
+    escritor = None
+    if not args.dry_run:
+        try:
+            escritor = Escritor(destino, binding.profile)
+        except DestinoInvalido as exc:
+            print(f"❌ {exc}", file=sys.stderr)
+            return 1
+
+    vistos = _Novedades(reporte)
+    for avance in preparar_stream(
         origen,
         binding.profile,
+        reporte=reporte,
         patrones=tuple(args.only),
         omitir=tuple(args.skip),
         carpeta_cache=carpeta_cache,
         ocr=usar_ocr,
-    )
+    ):
+        if escritor is not None:
+            escritor.anadir(avance.fragmentos)
+        _imprimir(avance, escrito=escritor is not None)
+        vistos.imprimir()
 
-    for nombre, marcador in reporte.vetados:
-        print(f"  ⛔ {nombre}: contiene «{marcador}» → EXCLUIDO por el perfil")
-    for nombre, motor, confianza in reporte.transcritos:
-        marca = f" (confianza {confianza}%)" if confianza is not None else ""
-        print(f"  ⎋ {nombre}: transcrito con «{motor}»{marca}")
-    for aviso in reporte.avisos:
-        print(f"  ⚠ {aviso}")
-    for nombre, detalle in reporte.errores:
-        print(f"  ✗ {nombre}: no se pudo leer → {detalle}")
-    for nombre, motivo in reporte.sin_texto:
-        print(f"  ⚠ {nombre}: {motivo}")
-    for nombre, motivo in reporte.omitidos:
-        print(f"  ↷ {nombre}: {motivo}")
-
-    if not reporte.fragmentos:
+    if not reporte.total_fragmentos:
         print("\nNo se generó ningún fragmento.")
         return 1
 
@@ -124,21 +141,73 @@ def main() -> int:
         print(f"\n(dry-run) {reporte.documentos} documento(s) → {reporte.total_fragmentos} fragmento(s).")
         return 0
 
-    try:
-        escribir(reporte, destino, binding.profile)
-    except DestinoInvalido as exc:
-        print(f"❌ {exc}", file=sys.stderr)
-        return 1
+    # El manifiesto es lo único que sí necesita el lote completo: su cabecera
+    # lleva todas las columnas que apareció en cualquier documento.
+    escritor.cerrar()
 
-    for fragmento in reporte.fragmentos:
-        print(f"  ✔ {fragmento.nombre}  ({len(fragmento.texto)} caracteres)")
     print(
         f"\n{reporte.documentos} documento(s) → {reporte.total_fragmentos} fragmento(s) en {destino}"
     )
+    if reporte.errores or reporte.sin_texto or reporte.vetados or reporte.omitidos:
+        print(
+            f"Sin indexar: {len(reporte.errores)} ilegible(s), {len(reporte.sin_texto)} sin texto, "
+            f"{len(reporte.vetados)} vetado(s), {len(reporte.omitidos)} omitido(s)."
+        )
     if reporte.transcritos:
         print(f"{len(reporte.transcritos)} de ellos rescatados por transcripción.")
     print(f"Siguiente paso:  make sync-kb PROFILE={binding.slug}")
     return 0
+
+
+SIMBOLOS = {
+    "ok": "✔",
+    "vetado": "⛔",
+    "error": "✗",
+    "sin_texto": "⚠",
+    "omitido": "↷",
+}
+
+
+def _imprimir(avance, *, escrito: bool) -> None:
+    """Una línea por documento, en cuanto ese documento está en disco.
+
+    El ✔ significa «escrito»: en `--dry-run` no lo hay, porque marcar como
+    hecho un archivo que nadie creó es exactamente lo que no debe pasar.
+    """
+    cabeza = f"  [{avance.indice}/{avance.total}] {avance.archivo.name}"
+    if avance.estado == "ok":
+        print(f"{cabeza}  → {len(avance.fragmentos)} fragmento(s)", flush=True)
+        marca = "✔" if escrito else "·"
+        for fragmento in avance.fragmentos:
+            print(f"       {marca} {fragmento.nombre}  ({len(fragmento.texto)} caracteres)", flush=True)
+        return
+    detalle = avance.detalle
+    if avance.estado == "vetado":
+        detalle = f"contiene «{detalle}» → EXCLUIDO por el perfil"
+    print(f"{cabeza}  {SIMBOLOS[avance.estado]} {detalle}", flush=True)
+
+
+class _Novedades:
+    """Imprime lo que el reporte fue acumulando desde el documento anterior.
+
+    Las transcripciones y los avisos del OCR los anota el pipeline por su
+    cuenta; enseñarlos aquí, entre documento y documento, es lo que convierte
+    un lote de dos horas en algo que se puede mirar mientras corre.
+    """
+
+    def __init__(self, reporte) -> None:
+        self._reporte = reporte
+        self._transcritos = 0
+        self._avisos = 0
+
+    def imprimir(self) -> None:
+        for nombre, motor, confianza in self._reporte.transcritos[self._transcritos:]:
+            marca = f" (confianza {confianza}%)" if confianza is not None else ""
+            print(f"       ⎋ {nombre}: transcrito con «{motor}»{marca}", flush=True)
+        for aviso in self._reporte.avisos[self._avisos:]:
+            print(f"       ⚠ {aviso}", flush=True)
+        self._transcritos = len(self._reporte.transcritos)
+        self._avisos = len(self._reporte.avisos)
 
 
 def _confirmar_ocr(origen, binding, carpeta_cache, *, asumir_si: bool) -> bool:
