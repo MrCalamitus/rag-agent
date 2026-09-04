@@ -1,29 +1,78 @@
-# luis-cv
+# rag-agent
 
-Agente conversacional con RAG sobre documentación profesional verificada,
-expuesto como un endpoint compatible con **Open Responses** y desplegado en AWS
-con arquitectura de grado bancario.
+Agente RAG **auditable y reutilizable**: se apunta a una carpeta de documentos,
+se declara un tema en un YAML y queda un endpoint compatible con **Open
+Responses** desplegado en AWS con arquitectura de grado bancario.
 
 ---
 
 ## Qué es
 
-`luis-cv` responde preguntas sobre una trayectoria profesional —formación,
-titulación, certificaciones, experiencia— fundamentando **cada afirmación en el
-documento oficial que la respalda**. No es un chatbot sobre un currículum: es
-un agente cuya salida es auditable, porque devuelve junto a la respuesta la
-evidencia documental que la sustenta.
+`rag-agent` responde preguntas sobre un corpus documental fundamentando **cada
+afirmación en el documento que la respalda**. No es un chatbot sobre unos PDFs:
+es un agente cuya salida es auditable, porque devuelve junto a la respuesta la
+evidencia recuperada y su procedencia.
 
 El problema que resuelve no es "responder bien". Es **responder de forma
 verificable**. En un dominio donde una alucinación equivale a afirmar una
-credencial falsa, un agente que suena convincente pero no puede probar lo que
-dice no sirve. Por eso la recuperación no es un paso interno oculto: se emite
-como un ítem de salida del protocolo, con la consulta ejecutada, los fragmentos
-recuperados y su procedencia.
+credencial falsa —o a publicar una potencia de motor que el fabricante no da—
+un agente que suena convincente pero no puede probar lo que dice no sirve. Por
+eso la recuperación no es un paso interno oculto: se emite como un ítem de
+salida del protocolo, con la consulta ejecutada, los fragmentos recuperados y su
+procedencia.
 
 Está construido como implementación conforme del spec **Open Responses
 2026-04-24**, de modo que cualquier cliente que hable ese protocolo —SDKs,
 gateways, Open WebUI— puede consumirlo sin adaptadores.
+
+### Un servicio, varios temas
+
+Un **tema** es un `profiles/<slug>.yaml`: sobre qué responde el agente, con qué
+reglas, cuánta evidencia recupera, qué enmascara y cómo se trocea su corpus.
+Cambiar de dominio no es tocar Python.
+
+| Tema | Corpus | Particularidad |
+|---|---|---|
+| `luis-cv` | Títulos, cédulas y constancias | Enmascara CURP, RFC y teléfonos; postura sustentada ante preguntas de contratación |
+| `coches` | 123 fichas técnicas y folletos de 14 marcas | Trocea documentos largos; deduce `marca` de la carpeta; transcribe los PDF de imagen conservando la tabla |
+
+El despliegue sirve **todos los temas a la vez**: se comparte el plano de cómputo
+—VPC, ALB, ECS, endpoints— y se duplica solo la Knowledge Base, que sobre S3
+Vectors cuesta centavos. Añadir un tema son dos minutos de `apply`, no otros
+60 USD/mes. El cliente elige con la cabecera `X-Rag-Profile`.
+
+---
+
+## Empezar
+
+```bash
+make install     # entorno y dependencias
+make menu        # menú interactivo: configurar, preparar, probar, desplegar
+```
+
+El menú recoge los nombres y variables del proyecto —cuenta de AWS, región,
+prefijo de recursos, primer tema— y escribe `.env`, `infra/terraform.tfvars` y
+`profiles/<tema>.yaml`. Nada de eso está escrito en el código.
+
+```
+  Agente RAG  ·  rag-coches  ·  tema: coches  · local/stub
+  ────────────────────────────────────────────────────────────────────
+
+  1) Inicializar el proyecto ......... nombres, cuenta AWS y primer tema
+  2) Temas ........................... crear, activar o revisar un tema
+  3) Preparar corpus ................. documentos → fragmentos indexables
+  4) Probar en local ................. conversar con el agente sin AWS
+  5) Desplegar ....................... build, push e infraestructura
+  6) Sincronizar la base de conocimiento
+  7) Evaluar ......................... preguntas de oro y reporte
+  8) Estado .......................... qué está hecho y qué falta
+  0) Salir
+```
+
+Cada opción tiene su equivalente suelto (`make init`, `make corpus PROFILE=…`,
+`make deploy`, `make estado`); el menú existe porque reutilizar el agente en un
+tema nuevo son cinco pasos encadenados y la mitad de los errores de despliegue
+son creer que ya se hizo el anterior.
 
 ---
 
@@ -38,18 +87,18 @@ flowchart TB
 
         subgraph VPC["VPC"]
             subgraph Priv["Subredes privadas"]
-                ECS["ECS Fargate<br/>luis-cv-api<br/>FastAPI + boto3"]
+                ECS["ECS Fargate<br/>&lt;proyecto&gt;-api<br/>FastAPI + boto3"]
             end
             VPCE["VPC Endpoints (PrivateLink)<br/>bedrock-runtime · bedrock-agent-runtime<br/>s3 · ecr · secrets · logs"]
         end
 
         subgraph Bedrock["Amazon Bedrock"]
-            KB["Knowledge Base<br/>luis-cv-kb"]
+            KB["Knowledge Base<br/>una por tema"]
             LLM["Modelos<br/>Anthropic · GPT"]
             GR["Guardrail<br/>PII · fundamentación"]
         end
 
-        S3["S3<br/>luis-cv-corpus<br/>documentos fuente"]
+        S3["S3<br/>&lt;proyecto&gt;-corpus<br/>un prefijo por tema"]
         OBS["CloudWatch + X-Ray<br/>logs · métricas · trazas"]
         SM["Secrets Manager<br/>token de API"]
     end
@@ -70,10 +119,12 @@ flowchart TB
 
 1. El ALB termina TLS y enruta al servicio en subredes privadas. Su
    `idle_timeout` está elevado para no cortar respuestas largas.
-2. La aplicación valida la petición contra el contrato y resuelve el alias de
-   modelo a un ID de Bedrock.
-3. **Recuperación:** `bedrock-agent-runtime:Retrieve` sobre la Knowledge Base.
-   Los fragmentos se emiten como el ítem `agente:knowledge_search`.
+2. La aplicación valida la petición contra el contrato, resuelve el alias de
+   modelo a un ID de Bedrock y el tema (`X-Rag-Profile`) a sus reglas y su
+   Knowledge Base.
+3. **Recuperación:** `bedrock-agent-runtime:Retrieve` sobre la Knowledge Base
+   *de ese tema*. Los fragmentos se emiten como el ítem
+   `agente:knowledge_search`.
 4. **Inferencia:** `bedrock-runtime:ConverseStream` con el contexto recuperado,
    filtrado por el guardrail.
 5. Los tokens se traducen a eventos semánticos de Open Responses y viajan como
@@ -87,14 +138,14 @@ descartó un router de modelos externo.
 
 | Capa | Servicio | Recurso | Por qué |
 |---|---|---|---|
-| Borde | ALB | `luis-cv-prod-alb` | Timeouts controlables y SSE nativo. API Gateway impone un límite duro de 29 s que un RAG puede superar |
-| Cómputo | ECS Fargate | `luis-cv-api` | Control total del ciclo de vida de la conexión, sin servidores que administrar |
+| Borde | ALB | `<proyecto>-<entorno>-alb` | Timeouts controlables y SSE nativo. API Gateway impone un límite duro de 29 s que un RAG puede superar |
+| Cómputo | ECS Fargate | `<proyecto>-api` | Control total del ciclo de vida de la conexión, sin servidores que administrar |
 | Inferencia | Bedrock | Anthropic · GPT | Soberanía de datos: IAM nativo, sin llaves externas ni salida a internet |
-| Recuperación | Bedrock KB | `luis-cv-kb` | RAG administrado sin capa de orquestación de terceros |
-| Seguridad | Guardrails | `luis-cv-guardrail` | Filtro de PII y verificación de fundamentación |
-| Almacenamiento | S3 | `luis-cv-corpus-<acct>` | Origen de la ingesta, cifrado y sin acceso público |
-| Secretos | Secrets Manager | `luis-cv/api-token` | Ninguna credencial en imagen ni en variables de entorno |
-| Observabilidad | CloudWatch · X-Ray | `luis-cv-prod` | Trazado por tramos: recuperación e inferencia por separado |
+| Recuperación | Bedrock KB | `<proyecto>-<tema>` (una por tema) | RAG administrado sin capa de orquestación de terceros |
+| Seguridad | Guardrails | `<proyecto>-guardrail` | Filtro de PII y verificación de fundamentación |
+| Almacenamiento | S3 | `<proyecto>-corpus-<acct>` | Origen de la ingesta, cifrado y sin acceso público |
+| Secretos | Secrets Manager | `<proyecto>/api-token` | Ninguna credencial en imagen ni en variables de entorno |
+| Observabilidad | CloudWatch · X-Ray | `<proyecto>-<entorno>` | Trazado por tramos: recuperación e inferencia por separado |
 
 ### Stack
 
@@ -110,10 +161,67 @@ código auditable y control directo del prompt y del formato de eventos.
 
 ---
 
+### PDFs que no se dejan leer
+
+Un corpus real trae documentos ilegibles. La ingesta intenta tres cosas en orden
+de coste antes de rendirse, y dice siempre cuál usó:
+
+1. **Leer la capa de texto.** El caso normal.
+2. **Descifrar.** Muchos PDF corporativos vienen cifrados con contraseña de
+   propietario vacía —restringen copiar e imprimir, no leer— y su texto está
+   entero. Es el rescate más barato que existe.
+3. **Transcribir.** Solo si de verdad no hay texto, y solo si el perfil lo pide.
+
+```yaml
+# profiles/coches.yaml
+ocr:
+  motor: tablas       # ninguno | tablas | texto
+  dpi: 200
+  max_paginas: 20
+  min_chars_por_pagina: 200
+```
+
+`tablas` conserva la rejilla del documento. En una ficha comparativa eso no es un
+lujo: una fila de equipamiento leída sin su columna afirma de **todas** las
+versiones lo que solo vale para una. `texto` (tesseract) es gratis y offline
+pero aplana, y lo avisa.
+
+La interpretación es **opt-in por forma, no por tema**. Una tabla se lee como
+ficha comparativa solo si demuestra serlo; una tabla de datos —un balance, un
+histórico— se vuelca sin interpretar, con cada fila llevando sus encabezados
+dentro para que el troceado no deje cifras huérfanas de su columna. Es lo que
+permite apuntar el pipeline a un corpus que nadie ha revisado sin que invente
+relaciones entre datos.
+
+Antes de transcribir nada, `make corpus` enseña cuántas páginas va a procesar y
+cuánto cuesta; el resultado se cachea por contenido del archivo, así que
+reajustar el troceado no vuelve a pagarlo. Una transcripción demasiado pobre para
+ser evidencia —un folleto cuyas páginas son mapas— se descarta con su motivo en
+vez de indexarse como ruido.
+
+---
+
 ## Uso
 
 Todas las peticiones van a `POST /v1/responses` con
 `Authorization: Bearer <token>` y `Content-Type: application/json`.
+
+### Elegir el tema
+
+```bash
+curl -s "$BASE_URL/v1/profiles" -H "Authorization: Bearer $API_TOKEN"
+# {"default":"coches","data":[{"id":"coches",…},{"id":"luis-cv",…}]}
+
+curl -X POST "$BASE_URL/v1/responses" \
+  -H "Authorization: Bearer $API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -H "X-Rag-Profile: coches" \
+  -d '{"model": "agente-rag-sonnet", "input": "¿Qué motorización tiene la Hilux?"}'
+```
+
+Sin la cabecera se usa el tema por defecto, así que un cliente de Open Responses
+que no sabe que esto existe sigue funcionando. Un tema desconocido devuelve 400
+con `profile_not_found` y la lista de temas válidos.
 
 ### Consulta simple
 
@@ -272,9 +380,10 @@ termine** antes de declarar éxito. Ese último paso importa: Terraform acaba
 cuando ECS *acepta* la nueva definición, no cuando la tarea nueva *sirve*.
 
 ```bash
-# 4. Preparar el corpus (fuera del repositorio) e ingestarlo
-python scripts/prep_corpus.py --source ~/documentos --out ~/corpus-preparado
-./scripts/sync-kb.sh ~/corpus-preparado
+# 4. Preparar el corpus de cada tema e ingestarlo en su Knowledge Base
+pip install -e ".[ingest]"      # dependencias de la ingesta (no van en la imagen)
+make corpus PROFILE=coches      # PDFs → fragmentos + metadatos
+make sync-kb PROFILE=coches     # sube a s3://…/coches/ y lanza la ingesta
 
 # 5. Verificar contra el despliegue
 export BASE_URL=$(terraform -chdir=infra output -raw base_url)
@@ -301,8 +410,13 @@ previene en dos capas.
 | `aws_profile` | `luis` | Perfil de la máquina que despliega |
 | `aws_account_id` | — | Requerido. Guarda de cuenta destino |
 | `aws_region` | — | Región de despliegue |
-| `project` | `luis-cv` | Prefijo y tag de todos los recursos |
+| `project` | `rag-agent` | Prefijo y tag de todos los recursos |
 | `environment` | `prod` | Sufijo de nombres |
+| `default_profile` | *(primero)* | Tema usado sin cabecera `X-Rag-Profile` |
+
+Los temas **no** se declaran aquí: Terraform lee `profiles/*.yaml` y crea una
+Knowledge Base por cada uno. Añadir un tema es crear su YAML y aplicar; no hay
+una segunda lista que pueda divergir de la primera.
 
 Sobrescribible sin tocar el código:
 
@@ -327,6 +441,7 @@ que permite aislar el costo del proyecto en Cost Explorer con un filtro.
 | Infraestructura (Terraform) y despliegue | ✅ 72 recursos, ECS Fargate tras ALB |
 | Observabilidad | ◐ logs, métricas, panel y alarmas; falta X-Ray y notificación de alarmas |
 | Evaluación con preguntas de oro | ◐ 14 preguntas medidas; el plan contempla 20 |
+| RAG general reutilizable | ◐ temas por YAML, ingesta de PDF con troceado, menú interactivo y N Knowledge Bases en Terraform; falta desplegar la topología multi-tema |
 | **HTTPS en el balanceador** | ⏳ **pendiente** — hoy sirve en claro, el token viaja legible |
 | Guardrail administrado de Bedrock | ⏳ pendiente |
 

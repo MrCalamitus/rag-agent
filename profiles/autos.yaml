@@ -1,0 +1,79 @@
+# Perfil: fichas técnicas y folletos de marcas de coches.
+#
+# Corpus público y voluminoso: PDFs largos, sin datos personales. Es el caso
+# opuesto al de credenciales y por eso sirve de contraste — aquí el troceado es
+# imprescindible y el enmascarado sería dañino (taparía potencias y precios).
+
+slug: autos
+name: Marcas y modelos de coches
+
+subject: >-
+  los vehículos, versiones, equipamiento y especificaciones técnicas de las
+  marcas documentadas
+sources: los folletos y fichas técnicas oficiales de cada marca
+
+decline_phrase: "Eso no consta en la documentación disponible."
+
+extra_rules:
+  - >-
+    Cuando des una cifra (potencia, consumo, dimensiones, precio, capacidad),
+    indica siempre a qué versión o motorización concreta corresponde. Una cifra
+    sin su versión es tan engañosa como una inventada.
+  - >-
+    No compares marcas ni modelos que no aparezcan ambos en los fragmentos, y no
+    conviertas una ausencia en una carencia: que un folleto no mencione una
+    característica no significa que el vehículo no la tenga.
+  - >-
+    Los folletos incluyen texto legal que advierte que las especificaciones
+    pueden variar por mercado y año. Cuando la pregunta dependa de eso, dilo.
+
+# Sin enmascarado: en este corpus los números son especificaciones. El patrón
+# de cédula convertiría cualquier número de 7-8 cifras en asteriscos.
+redaction: []
+
+retrieval:
+  # Más fragmentos que en el corpus de credenciales: aquí la respuesta suele
+  # combinar varias secciones (motor + equipamiento + dimensiones).
+  top_k: 8
+  # Con un corpus grande los scores sí se separan, así que el piso ya rinde.
+  min_score: 0.35
+
+# Muchas fichas son PDF de imagen: el texto no se puede extraer. `tablas` las
+# transcribe conservando la rejilla, que aquí no es un lujo — una fila de
+# equipamiento leída sin su columna afirma de todas las versiones lo que solo
+# vale para una.
+ocr:
+  motor: tablas
+  min_chars: 200
+  dpi: 200
+  max_paginas: 20
+  idioma: spa
+  # Cómo llamar a las columnas al redactar una tabla comparativa. Aquí son
+  # versiones de un modelo; en un corpus financiero serían «periodos».
+  columnas: versiones
+
+chunking:
+  max_chars: 2000
+  overlap_chars: 250
+  min_chars_to_split: 2600
+
+# El primer tramo de la ruta bajo `source` se convierte en metadato: con
+# `corpus/toyota/hilux-2024.pdf` el fragmento sale con `marca=toyota`, que es lo
+# que permite filtrar y lo que el prompt muestra junto a la cita.
+path_metadata: [marca]
+
+banned_markers: []
+
+# Qué documentos puede llegar a consultar el usuario.
+#
+# Aquí todo: son folletos y fichas que las marcas publican para que se lean.
+# Poner `por_defecto: publico` significa que un PDF nuevo entra expuesto sin
+# que nadie lo clasifique — que es exactamente lo que se quiere en un corpus
+# de material promocional, y exactamente lo que NO se quiere en `luis-cv`.
+documentos:
+  por_defecto: publico
+  expone: [publico]
+
+corpus:
+  source: corpus
+  prepared: .corpus-preparado/autos

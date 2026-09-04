@@ -8,11 +8,11 @@ from __future__ import annotations
 
 import pytest
 
-from luis_cv.application.ports import ModelDescriptor, TextChunk, UsageReport
-from luis_cv.domain.conversation import Conversation, GenerationSettings, Role, Turn
-from luis_cv.domain.errors import AgentError, ErrorType
-from luis_cv.infrastructure.outbound.bedrock.knowledge_base import BedrockKnowledgeBase
-from luis_cv.infrastructure.outbound.bedrock.language_model import BedrockLanguageModel
+from rag_agent.application.ports import ModelDescriptor, TextChunk, UsageReport
+from rag_agent.domain.conversation import Conversation, GenerationSettings, Role, Turn
+from rag_agent.domain.errors import AgentError, ErrorType
+from rag_agent.infrastructure.outbound.bedrock.knowledge_base import BedrockKnowledgeBase
+from rag_agent.infrastructure.outbound.bedrock.language_model import BedrockLanguageModel
 
 MODELO = ModelDescriptor("agente-rag-sonnet", "anthropic.claude-sonnet-5")
 CONVERSACION = Conversation(
@@ -234,9 +234,9 @@ async def test_un_fallo_del_proveedor_es_model_error_sin_detalle():
 async def test_readiness_del_catalogo_no_toca_la_red():
     """El plano de control no es alcanzable dentro de la VPC y no hace falta:
     readiness solo mira lo que impide servir."""
-    from luis_cv.infrastructure.outbound.model_catalog import BedrockModelCatalog
+    from rag_agent.infrastructure.outbound.model_catalog import BedrockModelCatalog
 
-    import luis_cv.infrastructure.outbound.bedrock.clients as clientes
+    import rag_agent.infrastructure.outbound.bedrock.clients as clientes
 
     def explota(*a, **k):  # pragma: no cover - no debe llamarse
         raise AssertionError("readiness no puede llamar al plano de control")
@@ -252,13 +252,13 @@ async def test_readiness_del_catalogo_no_toca_la_red():
 
 def test_verify_access_detecta_un_alias_sin_acceso():
     """La verificación de acceso corre en el despliegue, desde fuera de la VPC."""
-    from luis_cv.infrastructure.outbound.model_catalog import BedrockModelCatalog
+    from rag_agent.infrastructure.outbound.model_catalog import BedrockModelCatalog
 
     class ClienteControlPlano:
         def list_foundation_models(self):
             return {"modelSummaries": [{"modelId": "anthropic.claude-haiku-4-5-20251001-v1:0"}]}
 
-    import luis_cv.infrastructure.outbound.bedrock.clients as clientes
+    import rag_agent.infrastructure.outbound.bedrock.clients as clientes
 
     original = clientes.build_client
     clientes.build_client = lambda *a, **k: ClienteControlPlano()
@@ -274,9 +274,9 @@ def test_verify_access_no_denuncia_cuando_el_plano_de_control_no_responde():
     despliegue por no poder comprobarlo."""
     from botocore.exceptions import EndpointConnectionError
 
-    from luis_cv.infrastructure.outbound.model_catalog import BedrockModelCatalog
+    from rag_agent.infrastructure.outbound.model_catalog import BedrockModelCatalog
 
-    import luis_cv.infrastructure.outbound.bedrock.clients as clientes
+    import rag_agent.infrastructure.outbound.bedrock.clients as clientes
 
     def explota(*a, **k):
         raise EndpointConnectionError(endpoint_url="https://bedrock.us-east-1.amazonaws.com")

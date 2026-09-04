@@ -1,0 +1,87 @@
+---
+/**
+ * La conversación: hilo, estado vacío y compositor.
+ *
+ * El servidor emite el esqueleto y las plantillas; todo lo demás lo pinta el
+ * cliente conforme llega el stream.
+ */
+import Icon from "./Icon.astro";
+import Message from "./Message.astro";
+import Sources from "./Sources.astro";
+import Viewer from "./Viewer.astro";
+
+interface Props {
+  suggestions: string[];
+  /** Si el tema publica alguno de sus documentos originales. */
+  exposesDocuments: boolean;
+}
+
+const { suggestions, exposesDocuments } = Astro.props;
+---
+
+<div data-chat data-exposes={exposesDocuments ? "1" : "0"}>
+  <main id="conversacion" class="wrap thread" data-thread tabindex="-1">
+    <section class="empty" data-empty>
+      <h2>Pregunta sobre la documentación</h2>
+      <p>
+        Cada respuesta viene con los fragmentos que la sustentan. Si algo no consta,
+        el agente lo dice en vez de rellenarlo.
+      </p>
+      {
+        suggestions.length > 0 && (
+          <ul class="suggestions">
+            {suggestions.map((question) => (
+              <li>
+                <button type="button" class="suggestion" data-suggestion={question}>
+                  {question}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )
+      }
+    </section>
+  </main>
+
+  <!--
+    Lo que se anuncia a un lector de pantalla. La respuesta se publica aquí una
+    vez terminada, no token a token: el hilo visible lleva `aria-hidden` mientras
+    escribe justo para evitar que se lea a trompicones.
+  -->
+  <div class="sr-only" role="status" aria-live="polite" aria-atomic="true" data-live></div>
+
+  <div class="composer">
+    <form class="wrap" data-chat-form>
+      <div class="composer__box">
+        <label class="sr-only" for="pregunta">Tu pregunta</label>
+        <textarea
+          id="pregunta"
+          name="pregunta"
+          rows="1"
+          data-input
+          placeholder="Escribe tu pregunta…"
+          autocomplete="off"
+          enterkeyhint="send"></textarea>
+        <button type="submit" class="icon-button" data-send aria-label="Enviar pregunta">
+          <Icon name="send" size={20} filled />
+        </button>
+      </div>
+      <p class="composer__hint">
+        Enter envía · Shift + Enter salta de línea. El agente solo responde con lo que
+        consta en los documentos.
+      </p>
+    </form>
+  </div>
+
+  <Message />
+  <Sources />
+  <Viewer />
+</div>
+
+<script>
+  import { initChat } from "./client/chat";
+  import { initViewer } from "./client/viewer";
+
+  initViewer(document);
+  initChat(document);
+</script>

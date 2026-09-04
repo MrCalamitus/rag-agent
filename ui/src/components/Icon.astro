@@ -1,0 +1,28 @@
+---
+/**
+ * Un icono de Material Symbols.
+ *
+ * Decorativo por defecto, y esa es la parte que importa: el glifo se dibuja a
+ * partir de un ligature, o sea que el nodo contiene la palabra "send" como texto
+ * literal. Sin `aria-hidden` un lector de pantalla la lee en voz alta; sin
+ * `translate="no"` el traductor del navegador la cambia por "enviar" y el icono
+ * desaparece. Cuando un control no tiene más contenido que su icono, la etiqueta
+ * va en el `aria-label` del BOTÓN, nunca aquí.
+ */
+interface Props {
+  name: string;
+  size?: number;
+  filled?: boolean;
+  class?: string;
+}
+
+const { name, size = 20, filled = false, class: className } = Astro.props;
+---
+
+<span
+  class:list={["msym", className]}
+  style={size !== 20 ? `font-size:${size}px` : undefined}
+  data-filled={filled ? "" : undefined}
+  aria-hidden="true"
+  translate="no"
+>{name}</span>

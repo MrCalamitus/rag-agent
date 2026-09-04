@@ -14,15 +14,15 @@ from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 
-from luis_cv.application.ports import (
+from rag_agent.application.ports import (
     LanguageModelChunk,
     ModelDescriptor,
     TextChunk,
     UsageReport,
 )
-from luis_cv.domain.conversation import Conversation, GenerationSettings
-from luis_cv.domain.errors import AgentError, model_error
-from luis_cv.domain.retrieval import Chunk, RetrievalOutcome
+from rag_agent.domain.conversation import Conversation, GenerationSettings
+from rag_agent.domain.errors import AgentError, model_error
+from rag_agent.domain.retrieval import Chunk, RetrievalOutcome
 
 
 @dataclass

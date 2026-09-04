@@ -16,13 +16,18 @@ FROM python:3.12-slim AS runtime
 ENV PATH="/opt/venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    LUISCV_ENVIRONMENT=prod
+    RAG_ENVIRONMENT=prod
 
 # Usuario sin privilegios: el proceso no necesita root y no debe tenerlo.
 RUN useradd --system --uid 10001 --create-home agente
 COPY --from=build /opt/venv /opt/venv
 
 WORKDIR /app
+# Los perfiles viajan con la imagen: son las reglas del agente, no configuración
+# de entorno. Los IDs de sus Knowledge Bases sí llegan por variable, porque esos
+# sí cambian entre despliegues.
+COPY profiles ./profiles
+
 USER agente
 EXPOSE 8080
 
@@ -31,5 +36,5 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
 
 # Sin `--reload`, un solo proceso por tarea: la escala la da ECS, no el WSGI.
 # `timeout-keep-alive` por debajo del idle_timeout del ALB (120 s).
-CMD ["uvicorn", "luis_cv.main:app", "--host", "0.0.0.0", "--port", "8080", \
+CMD ["uvicorn", "rag_agent.main:app", "--host", "0.0.0.0", "--port", "8080", \
      "--timeout-keep-alive", "115", "--no-access-log"]

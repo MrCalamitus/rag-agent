@@ -1,4 +1,14 @@
-# Knowledge Base sobre **S3 Vectors** (decisión B, cerrada).
+# Knowledge Base sobre **S3 Vectors**, una por tema (decisión B, cerrada).
+#
+# Topología: **un solo plano de cómputo, N bases de conocimiento**. La VPC, el
+# balanceador, el servicio de ECS y los endpoints de interfaz —que son el costo
+# fijo del despliegue— se comparten entre todos los temas; lo que se duplica es
+# el índice vectorial, que sobre S3 Vectors cuesta centavos. Añadir un tema es
+# crear su `profiles/<slug>.yaml` y aplicar: no otro balanceador.
+#
+# El corpus vive en un único bucket con un prefijo por tema. Un bucket por tema
+# no aportaría aislamiento real —el mismo rol los leería todos— y multiplicaría
+# políticas idénticas.
 #
 # El vector store era la partida con más riesgo de costo del proyecto:
 # OpenSearch Serverless factura OCUs corriendo de forma continua, existan o no
@@ -44,7 +54,7 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "corpus" {
   }
 }
 
-# Son documentos de identidad: que nadie pueda subirlos sin cifrar en tránsito.
+# Puede haber documentos sensibles: que nadie pueda subirlos sin cifrar en tránsito.
 data "aws_iam_policy_document" "corpus_tls" {
   statement {
     sid       = "SoloTLS"
@@ -79,9 +89,14 @@ resource "aws_s3vectors_vector_bucket" "kb" {
   tags = { Name = "${local.name}-vectors" }
 }
 
+# Un índice por tema: mezclar corpus en un mismo índice haría competir en el
+# ranking a documentos de dominios distintos, y un filtro mal puesto devolvería
+# fichas de coches a una pregunta sobre credenciales.
 resource "aws_s3vectors_index" "kb" {
+  for_each = local.profiles
+
   vector_bucket_name = aws_s3vectors_vector_bucket.kb.vector_bucket_name
-  index_name         = "${var.project}-index"
+  index_name         = "${var.project}-${each.key}"
   data_type          = "float32"
   dimension          = var.embedding_dimension
   distance_metric    = "cosine"
@@ -93,7 +108,7 @@ resource "aws_s3vectors_index" "kb" {
     non_filterable_metadata_keys = ["AMAZON_BEDROCK_TEXT", "AMAZON_BEDROCK_METADATA"]
   }
 
-  tags = { Name = "${local.name}-index" }
+  tags = { Name = "${local.name}-${each.key}-index" }
 }
 
 # --- Rol de la Knowledge Base -------------------------------------------------
@@ -158,10 +173,10 @@ data "aws_iam_policy_document" "knowledge_base" {
       "s3vectors:ListVectors",
       "s3vectors:DeleteVectors",
     ]
-    resources = [
-      aws_s3vectors_vector_bucket.kb.vector_bucket_arn,
-      aws_s3vectors_index.kb.index_arn,
-    ]
+    resources = concat(
+      [aws_s3vectors_vector_bucket.kb.vector_bucket_arn],
+      [for indice in aws_s3vectors_index.kb : indice.index_arn],
+    )
   }
 }
 
@@ -174,7 +189,9 @@ resource "aws_iam_role_policy" "knowledge_base" {
 # --- Knowledge Base y origen de datos -----------------------------------------
 
 resource "aws_bedrockagent_knowledge_base" "main" {
-  name     = "${var.project}-kb"
+  for_each = local.profiles
+
+  name     = "${var.project}-${each.key}"
   role_arn = aws_iam_role.knowledge_base.arn
 
   knowledge_base_configuration {
@@ -189,19 +206,21 @@ resource "aws_bedrockagent_knowledge_base" "main" {
     type = "S3_VECTORS"
 
     s3_vectors_configuration {
-      index_arn = aws_s3vectors_index.kb.index_arn
+      index_arn = aws_s3vectors_index.kb[each.key].index_arn
     }
   }
 
-  tags = { Name = "${local.name}-kb" }
+  tags = { Name = "${local.name}-${each.key}-kb" }
 
   depends_on = [aws_iam_role_policy.knowledge_base]
 }
 
 resource "aws_bedrockagent_data_source" "corpus" {
-  knowledge_base_id    = aws_bedrockagent_knowledge_base.main.id
-  name                 = "${var.project}-corpus"
-  description          = "Documentos oficiales normalizados: títulos, cédulas, certificaciones y CV"
+  for_each = local.profiles
+
+  knowledge_base_id    = aws_bedrockagent_knowledge_base.main[each.key].id
+  name                 = "${var.project}-${each.key}-corpus"
+  description          = try(each.value.name, each.key)
   data_deletion_policy = "DELETE"
 
   data_source_configuration {
@@ -209,15 +228,18 @@ resource "aws_bedrockagent_data_source" "corpus" {
 
     s3_configuration {
       bucket_arn = aws_s3_bucket.corpus.arn
+      # Cada tema ve solo su prefijo. Sin esto, las tres bases ingerirían el
+      # corpus entero y cada una respondería con documentos de las otras.
+      inclusion_prefixes = ["${each.key}/"]
     }
   }
 
   vector_ingestion_configuration {
     chunking_configuration {
-      # Un documento = un fragmento (decisión de E2). Un título o una cédula
-      # son cortos por naturaleza; el default de 300 tokens los parte y destroza
-      # la relación entre institución, carrera y fecha. Es la causa número uno
-      # de RAG malo sobre corpus pequeños.
+      # `NONE` en todos los temas: el troceado ya lo hizo `make corpus`, con la
+      # política del perfil y produciendo `document_id` legibles. Delegarlo aquí
+      # devolvería fragmentos citados por URI de S3 y sin los metadatos que el
+      # pipeline deduce de la ruta.
       chunking_strategy = "NONE"
     }
   }

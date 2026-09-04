@@ -7,11 +7,11 @@ import time
 import httpx
 import pytest
 
-from luis_cv.domain.errors import model_error
-from luis_cv.infrastructure.container import build_container
-from luis_cv.infrastructure.inbound.http.app import create_app
-from luis_cv.infrastructure.outbound.local.corpus_knowledge_base import LocalCorpusKnowledgeBase
-from luis_cv.infrastructure.outbound.local.grounded_stub_model import GroundedStubLanguageModel
+from rag_agent.domain.errors import model_error
+from rag_agent.infrastructure.container import build_container
+from rag_agent.infrastructure.inbound.http.app import create_app
+from rag_agent.infrastructure.outbound.local.corpus_knowledge_base import LocalCorpusKnowledgeBase
+from rag_agent.infrastructure.outbound.local.grounded_stub_model import GroundedStubLanguageModel
 
 from ..conftest import CORPUS, build_client
 from ..support.fakes import FrozenClock, RecordingTelemetry, ScriptedLanguageModel, SequentialIds

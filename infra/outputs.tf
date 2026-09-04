@@ -33,14 +33,19 @@ output "log_group" {
   description = "Grupo de logs de la aplicación."
 }
 
-output "knowledge_base_id" {
-  description = "ID de la Knowledge Base. Lo consume sync-kb.sh para lanzar la ingesta."
-  value       = aws_bedrockagent_knowledge_base.main.id
+output "knowledge_base_ids" {
+  description = "slug del tema → ID de su Knowledge Base. Lo consume sync-kb.sh."
+  value       = local.knowledge_base_ids
 }
 
-output "data_source_id" {
-  description = "Origen de datos de la KB."
-  value       = aws_bedrockagent_data_source.corpus.data_source_id
+output "data_source_ids" {
+  description = "slug del tema → ID de su origen de datos."
+  value       = { for slug, ds in aws_bedrockagent_data_source.corpus : slug => ds.data_source_id }
+}
+
+output "profiles" {
+  description = "Temas que sirve este despliegue, leídos de profiles/*.yaml."
+  value       = sort(keys(local.profiles))
 }
 
 output "corpus_bucket" {

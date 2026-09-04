@@ -5,17 +5,29 @@ locals {
     Project     = var.project
     Environment = var.environment
     ManagedBy   = "terraform"
-    Repo        = "luis-cv"
+    Repo        = "rag-agent"
   }
 
   # Puerto del contenedor; coincide con el CMD del Dockerfile.
   container_port = 8080
 
-  metrics_namespace = "luis-cv"
+  metrics_namespace = "rag-agent"
 
   embedding_model_arn = "arn:aws:bedrock:${var.aws_region}::foundation-model/${var.embedding_model_id}"
 
-  knowledge_base_id = aws_bedrockagent_knowledge_base.main.id
+  # Los temas se leen de `profiles/*.yaml`: es la misma lista que consume el
+  # servicio, así que no hay dos fuentes de verdad que puedan divergir. Añadir
+  # un tema es crear su YAML y aplicar — no editar también un tfvars.
+  profiles_dir  = "${path.module}/../profiles"
+  profile_files = fileset(local.profiles_dir, "*.y*ml")
+  profiles = {
+    for archivo in local.profile_files :
+    yamldecode(file("${local.profiles_dir}/${archivo}")).slug => yamldecode(file("${local.profiles_dir}/${archivo}"))
+  }
+
+  # slug → ID de su Knowledge Base. Es lo que la task definition inyecta en el
+  # contenedor: el servicio no sabe de Terraform, solo recibe el mapa.
+  knowledge_base_ids = { for slug, kb in aws_bedrockagent_knowledge_base.main : slug => kb.id }
 
   # Los perfiles de inferencia `us.` enrutan a varias regiones; la política
   # necesita el modelo base en cada una.

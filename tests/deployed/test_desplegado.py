@@ -19,7 +19,7 @@ import pytest
 
 BASE_URL = os.getenv("BASE_URL", "").rstrip("/")
 TOKEN = os.getenv("API_TOKEN", "")
-MODELO = os.getenv("LUISCV_EVAL_MODEL", "agente-rag-sonnet")
+MODELO = os.getenv("RAG_EVAL_MODEL", "agente-rag-sonnet")
 
 pytestmark = [
     pytest.mark.deployed,

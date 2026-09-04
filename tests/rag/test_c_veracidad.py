@@ -16,8 +16,8 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from luis_cv.domain.prompts import DECLINE_PHRASE, is_denial
-from luis_cv.infrastructure.container import build_container
+from rag_agent.domain.prompts import DECLINE_PHRASE, is_denial
+from rag_agent.infrastructure.container import build_container
 
 pytestmark = pytest.mark.rag
 
@@ -231,9 +231,9 @@ def cliente_con_credenciales(settings, telemetry):
     no comparte palabras con ningún documento y no recupera nada — lo que hace
     correcto declinar y vuelve el caso inservible para lo que aquí se mide.
     """
-    from luis_cv.domain.retrieval import Chunk
-    from luis_cv.infrastructure.container import build_language_model
-    from luis_cv.infrastructure.inbound.http.app import create_app
+    from rag_agent.domain.retrieval import Chunk
+    from rag_agent.infrastructure.container import build_language_model
+    from rag_agent.infrastructure.inbound.http.app import create_app
 
     from ..support.fakes import FrozenClock, SequentialIds, StubKnowledgeBase
 

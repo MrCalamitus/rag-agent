@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from luis_cv.domain.conversation import Conversation, Role, Turn
-from luis_cv.domain.prompts import DECLINE_PHRASE, build_system_prompt, render_context
-from luis_cv.domain.query_planning import condense, plan_queries
-from luis_cv.domain.redaction import StreamingRedactor, contains_identifier, fingerprint, mask_identifiers
-from luis_cv.domain.retrieval import Chunk, RetrievalOutcome
+from rag_agent.domain.conversation import Conversation, Role, Turn
+from rag_agent.domain.prompts import DECLINE_PHRASE, build_system_prompt, render_context
+from rag_agent.domain.query_planning import condense, plan_queries
+from rag_agent.domain.redaction import StreamingRedactor, contains_identifier, fingerprint, mask_identifiers
+from rag_agent.domain.retrieval import Chunk, RetrievalOutcome
 
 CURP = "GOOL850315HDFRRS09"
 RFC = "GOOL850315AB1"
@@ -84,7 +84,7 @@ def test_el_prompt_obliga_a_citar_y_a_declinar_sin_evidencia():
     prompt = build_system_prompt(Conversation((Turn(Role.USER, "hola"),)), ())
 
     assert DECLINE_PHRASE in prompt
-    assert "document_id" in prompt
+    assert "citar entre corchetes el nombre del documento" in prompt
     assert "(ninguno)" in prompt
 
 
@@ -109,6 +109,34 @@ def test_el_contexto_incluye_procedencia_y_metadatos():
 
     assert "[titulo-2019.pdf]" in contexto
     assert "anio=2019" in contexto
+
+
+def test_el_contexto_cita_el_documento_original_y_no_el_trozo():
+    """`titulo-2019--003.md` es el nombre del trozo que produjo la ingesta y no
+    existe fuera del corpus: una cita que el lector no puede buscar no sirve."""
+    chunk = Chunk(
+        "titulo-2019--003.md",
+        "Título de Ingeniería",
+        0.9,
+        {"fuente": "titulo-2019.pdf", "anio": 2019},
+    )
+
+    contexto = render_context((chunk,))
+
+    assert "[titulo-2019.pdf]" in contexto
+    assert "titulo-2019--003.md" not in contexto
+    # `fuente` no se repite entre los metadatos: ya es el encabezado, y verlo
+    # dos veces invita al modelo a citar `fuente=titulo-2019.pdf`.
+    assert "fuente=" not in contexto
+    assert "anio=2019" in contexto
+
+
+def test_sin_fuente_en_la_metadata_se_cita_el_document_id():
+    """Un corpus preparado antes de que la ingesta estampara `fuente` sigue
+    citándose: peor nombre, pero nunca ninguno."""
+    chunk = Chunk("titulo-2019--003.md", "Título de Ingeniería", 0.9, {})
+
+    assert "[titulo-2019--003.md]" in render_context((chunk,))
 
 
 def test_plan_de_consultas_agrega_una_variante_condensada():
@@ -155,7 +183,7 @@ def test_el_resultado_de_recuperacion_deduplica_documentos():
 def test_se_reconocen_las_formas_de_negacion_de_un_modelo_real(respuesta):
     """Un modelo real casi nunca usa la frase canónica literal, y sus
     negaciones suelen ser mejores: nombran qué falta y ofrecen continuar."""
-    from luis_cv.domain.prompts import is_denial
+    from rag_agent.domain.prompts import is_denial
 
     assert is_denial(respuesta)
 
@@ -171,6 +199,6 @@ def test_se_reconocen_las_formas_de_negacion_de_un_modelo_real(respuesta):
 def test_una_afirmacion_no_se_confunde_con_una_negacion(respuesta):
     """La heurística no puede dar por negada una respuesta que afirma: sería
     dar por bueno justo el fallo que la evaluación busca."""
-    from luis_cv.domain.prompts import is_denial
+    from rag_agent.domain.prompts import is_denial
 
     assert not is_denial(respuesta)

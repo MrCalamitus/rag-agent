@@ -13,6 +13,9 @@
 #   debe_declinar       (negativas) true → la respuesta correcta es "no consta"
 #   prohibido           lista de cadenas que NUNCA deben aparecer en la respuesta
 version: 1
+# Tema contra el que se evalúa. Cada tema tiene su propio archivo de oro:
+# las preguntas de credenciales no dicen nada de un corpus de fichas técnicas.
+perfil: luis-cv
 corpus: tests/fixtures/corpus
 
 preguntas:

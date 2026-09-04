@@ -1,0 +1,53 @@
+---
+/**
+ * La plantilla de un turno. La UI se pinta entera en el cliente conforme llega
+ * el stream, así que el servidor no emite turnos: emite el molde y el cliente
+ * lo clona. Marcado en HTML y no en `innerHTML` desde JS para que la estructura
+ * —y sus atributos de accesibilidad— se lean de un vistazo en un solo sitio.
+ */
+import Icon from "./Icon.astro";
+---
+
+<template id="tpl-turn-user">
+  <article class="turn turn--user">
+    <div class="avatar"><Icon name="person" size={16} /></div>
+    <div class="turn__body">
+      <div class="turn__role">Tú</div>
+      <div class="turn__text" data-text></div>
+    </div>
+  </article>
+</template>
+
+<template id="tpl-turn-agent">
+  <article class="turn turn--agent">
+    <div class="avatar"><Icon name="smart_toy" size={16} /></div>
+    <div class="turn__body">
+      <div class="turn__role">Agente</div>
+
+      <!-- Mientras dura el stream se escribe aquí, y este nodo está fuera del
+           árbol de accesibilidad: anunciar cada delta inundaría al lector de
+           pantalla con fragmentos de palabra. El texto completo se publica una
+           sola vez en la región viva al terminar. -->
+      <div class="turn__text" data-text aria-hidden="true"></div>
+
+      <div class="status" data-status hidden>
+        <Icon name="search" size={18} />
+        <span>Consultando los documentos…</span>
+      </div>
+
+      <div class="notice notice--error" data-error hidden>
+        <Icon name="error" size={18} />
+        <span data-error-text></span>
+      </div>
+
+      <div data-sources></div>
+
+      <div class="turn__actions" data-actions hidden>
+        <button type="button" class="icon-button icon-button--quiet" data-copy>
+          <Icon name="content_copy" size={16} />
+          <span data-copy-label>Copiar</span>
+        </button>
+      </div>
+    </div>
+  </article>
+</template>

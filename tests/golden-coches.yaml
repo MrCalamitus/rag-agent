@@ -1,0 +1,77 @@
+# Preguntas de oro — tema `coches`.
+#
+# ESTADO: conjunto de arranque. Las preguntas positivas están escritas sobre
+# documentos que se sabe que existen en el corpus (nombre de archivo y marca);
+# faltan las que solo se pueden escribir leyendo el contenido: cifras concretas
+# de potencia, consumo y equipamiento, que son las que de verdad miden si el
+# agente cita bien.
+#
+# Al ampliarlo, la regla del proyecto: entre 5 y 7 negativas sobre 20. Un
+# conjunto solo de positivas mide recuperación, no veracidad — y en este corpus
+# el modo de falla caro es inventar una cifra, no dejar de encontrarla.
+#
+# `documento_esperado` se compara por documento de origen, sin el sufijo de
+# fragmento: `ficha-tecnica-hilux` acierta con `ficha-tecnica-hilux--003.md`.
+version: 1
+perfil: coches
+corpus: .corpus-preparado/coches
+
+preguntas:
+  - id: C01
+    pregunta: "¿Qué motorización tiene la Toyota Hilux?"
+    tipo: positiva
+    documento_esperado: ficha-tecnica-hilux
+
+  - id: C02
+    pregunta: "¿Qué equipamiento de seguridad trae el BYD Dolphin Mini?"
+    tipo: positiva
+    documento_esperado: ficha-tecnica-byd-dolphin-mini
+
+  - id: C03
+    pregunta: "What engine does the Toyota 4Runner hybrid have?"
+    tipo: positiva
+    documento_esperado: ficha-tecnica-4runner-hev
+
+  # --- contenido que solo existe gracias al rescate de PDFs ilegibles ---------
+  # El MG3 era un PDF de imagen: sin transcripción con estructura de tabla, este
+  # dato no está en el corpus. La segunda pregunta es la que de verdad mide el
+  # trabajo: pide una característica que solo tiene UNA de las cuatro versiones,
+  # y un OCR que aplanara la tabla la daría por buena para todas.
+  - id: C08
+    pregunta: "¿Cuánta potencia tiene el MG3 2026?"
+    tipo: positiva
+    documento_esperado: ficha-tecnica-mg-mg3
+
+  - id: C09
+    pregunta: "¿Qué versiones del MG3 2026 llevan quemacocos eléctrico?"
+    tipo: positiva
+    documento_esperado: ficha-tecnica-mg-mg3
+
+  # El Kia Sportage venía cifrado con AES: su texto estaba entero, solo había
+  # que descifrarlo. Sin eso, el documento no existía para el agente.
+  - id: C10
+    pregunta: "¿Qué motor tiene el Kia Sportage?"
+    tipo: positiva
+    documento_esperado: ficha-tecnica-kia-sportage
+
+  # --- negativas: marcas y modelos que NO están en el corpus ------------------
+  - id: C04
+    pregunta: "¿Cuánta potencia tiene el Ferrari 296 GTB?"
+    tipo: negativa
+    debe_declinar: true
+    prohibido: ["CV", "kW"]
+
+  - id: C05
+    pregunta: "¿Qué autonomía homologa el Tesla Model 3 Long Range?"
+    tipo: negativa
+    debe_declinar: true
+
+  - id: C06
+    pregunta: "¿Cuál de estos coches recomiendas para una familia de cinco?"
+    tipo: negativa
+    debe_declinar: true
+
+  - id: C07
+    pregunta: "¿Cuánto cuesta el mantenimiento a los 60.000 km de la Hilux?"
+    tipo: negativa
+    debe_declinar: true

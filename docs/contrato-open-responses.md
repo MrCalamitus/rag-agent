@@ -46,8 +46,10 @@ soportar todo y falla en silencio es peor que uno con superficie honesta.
 
 ```
 POST /v1/responses          # crear respuesta
+GET  /v1/profiles           # temas servidos por este despliegue (extensión)
+GET  /v1/documents/{nombre} # documento original, con permiso firmado (extensión)
 GET  /healthz               # liveness — sin auth, para el health check del ALB
-GET  /readyz                # readiness — verifica Bedrock y KB alcanzables
+GET  /readyz                # readiness — verifica Bedrock y las KB alcanzables
 ```
 
 ### Cabeceras de petición
@@ -56,9 +58,62 @@ GET  /readyz                # readiness — verifica Bedrock y KB alcanzables
 |---|---|---|
 | `Authorization` | Sí | `Bearer <token>` |
 | `Content-Type` | Sí | `application/json` |
+| `X-Rag-Profile` | No | Tema sobre el que responder (extensión) |
 
 El cuerpo MUST ir codificado como `application/json`. Ausencia o valor
 distinto → `invalid_request` (400).
+
+**`X-Rag-Profile` (extensión).** Un mismo despliegue sirve varios temas —cada
+uno con su corpus, sus reglas y su Knowledge Base— y esta cabecera elige cuál.
+Ausente → el tema por defecto del despliegue. Desconocido → `invalid_request`
+(400) con `code: profile_not_found` y la lista de temas válidos en el mensaje.
+
+Va en cabecera y no en el cuerpo a propósito: el cuerpo es el de Open Responses
+y §2 obliga a tolerar campos desconocidos ignorándolos, de modo que un `profile`
+mal escrito en el JSON se ignoraría en silencio y el cliente recibiría respuestas
+del tema equivocado sin ningún aviso. Como cabecera, un cliente estándar que no
+sabe que esto existe sigue funcionando y recibe el tema por defecto.
+
+**`GET /v1/profiles`.** Devuelve los temas disponibles y cuál es el
+predeterminado. Requiere autenticación: la lista de temas describe qué
+documentación hay indexada, y eso ya es información.
+
+```json
+{
+  "default": "autos",
+  "data": [
+    { "id": "autos", "name": "Marcas y modelos de coches",
+      "subject": "los vehículos, versiones y especificaciones…",
+      "masks_identifiers": false,
+      "exposes_documents": true }
+  ]
+}
+```
+
+`exposes_documents` dice si el tema publica alguno de sus documentos originales.
+Existe para que un cliente sepa si tiene sentido ofrecerlos sin tener que pedir
+uno y ver si falla.
+
+**`GET /v1/documents/{nombre}`.** Entrega el archivo original de un fragmento.
+No vuelve a resolver la política del tema: verifica el permiso firmado que viaja
+en `document_url` (`profile`, `exp`, `sig`). La decisión se toma una sola vez, al
+responder, que es donde hay contexto para tomarla; aquí solo se comprueba que
+existe y sigue vigente. Sigue exigiendo `Authorization`: el permiso dice *qué*
+documento, no *quién* puede pedirlo.
+
+| Situación | Respuesta |
+|---|---|
+| Permiso válido | `200` con el archivo, `Content-Disposition: inline` |
+| Firma inválida o caducada | `401`, `code: invalid_document_grant` |
+| El tema no expone documentos | `404`, `code: documents_not_exposed` |
+| El despliegue no tiene almacén | `404`, `code: documents_not_available` |
+| El archivo no está | `404`, `code: document_not_found` |
+
+Los bytes pasan por el servicio en lugar de entregarse con una URL prefirmada de
+S3. Cuesta un salto más, y a cambio el navegador nunca habla con S3 —así que no
+hace falta abrir CORS en el bucket—, el enlace caduca cuando lo decide el
+servicio y no una firma de AWS, y no queda ninguna URL de S3 circulando por un
+historial.
 
 ### Cabeceras de respuesta
 
@@ -216,12 +271,44 @@ recibo verificable de qué se recuperó y con qué consulta:
       "document_id": "s3://…/cedula-profesional.pdf",
       "chunk": "…",
       "score": 0.87,
-      "metadata": { "tipo": "documento_oficial", "anio": 2021 }
+      "metadata": { "tipo": "documento_oficial", "anio": 2021, "clase": "identidad" },
+      "exposed": false,
+      "document_url": null
     }
   ],
   "latency_ms": 340
 }
 ```
+
+**`exposed` (extensión).** Si el tema deja consultar el documento original de
+ese fragmento. Lo decide el servidor cruzando la `clase` que la ingesta estampó
+—una propiedad del documento— con la lista `documentos.expone` del perfil —una
+política del tema—. El reparto es deliberado: reclasificar exige reingesta,
+cambiar de política no cuesta nada, y ninguna de las dos cosas debería obligar a
+la otra.
+
+El campo viaja resuelto y no como dos metadatos que el cliente tenga que
+combinar: un cliente no debe necesitar conocer la política de un tema para saber
+si puede ofrecer un archivo, y dos clientes no deben poder discrepar sobre la
+misma respuesta.
+
+Por defecto un perfil **no expone nada**, y un fragmento sin `clase` —un corpus
+preparado antes de que esto existiera— tampoco. Es lo contrario al criterio de
+`redaction`, que por defecto no enmascara, y la asimetría es intencional:
+equivocarse allí tapa un dato, equivocarse aquí publica un archivo.
+
+**`document_url` (extensión).** Dónde abrir el documento original, o `null`.
+Presente solo cuando `exposed` es `true` **y** este despliegue tiene de dónde
+servirlo: autorizar y poder entregar son cosas distintas. Es una ruta relativa
+—el servicio no sabe bajo qué host lo publican, y una URL absoluta armada con la
+cabecera `Host` es una manera conocida de acabar firmando enlaces a otro sitio—
+y lleva un permiso firmado con el secreto del servicio. El cliente no puede
+fabricarla.
+
+Que un fragmento no esté expuesto **no lo excluye de `results`**. Sigue con su
+`document_id`, su `score` y su `chunk`: el recibo de qué sustentó la respuesta es
+justo lo que hace auditable al agente, y recortarlo por no poder entregar el PDF
+sería pagar el argumento entero por una parte.
 
 Todo ítem MUST llevar `id`, `type` y `status`. Los tipos de extensión MUST
 llevar el prefijo del slug del implementador.
