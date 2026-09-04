@@ -61,9 +61,10 @@ eval: .venv ## Preguntas de oro y reporte (PROFILE=tema, GOLDEN=ruta, MODELS=ali
 		--golden $${GOLDEN:-tests/golden$${PROFILE:+-$$PROFILE}.yaml}
 
 .PHONY: corpus
-corpus: .venv ## Prepara el corpus de un tema (PROFILE=slug; SOURCE/OUT opcionales)
-	@test -n "$$PROFILE" || (echo "Uso: make corpus PROFILE=autos" && exit 1)
-	$(PY) scripts/prep_corpus.py --profile $$PROFILE --no-ocr\
+corpus: .venv ## Prepara el corpus de un tema (PROFILE=slug; OCR=1 activa el motor; SOURCE/OUT opcionales)
+	@test -n "$$PROFILE" || (echo "Uso: make corpus PROFILE=autos [OCR=1]" && exit 1)
+	$(PY) scripts/prep_corpus.py --profile $$PROFILE \
+		$$(test -n "$$OCR" && echo --yes || echo --no-ocr) \
 		$${SOURCE:+--source $$SOURCE} $${OUT:+--out $$OUT} $${SKIP:+--skip $$SKIP} 
 
 .PHONY: corpus-docling

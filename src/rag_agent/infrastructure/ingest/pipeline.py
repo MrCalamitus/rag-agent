@@ -101,6 +101,15 @@ def extraer(archivo: Path, profile: Profile, ocr=None) -> Documento | None:
     return None
 
 
+def etiqueta_seleccion(seleccion: Sequence[int] | None) -> str:
+    """Parte de la clave de caché que identifica qué páginas se pidieron.
+
+    Vive aquí y no dentro del Transcriptor porque el estimador de costo tiene
+    que calcular la misma clave para saber si un documento ya está transcrito.
+    """
+    return ",".join(map(str, seleccion)) if seleccion is not None else ""
+
+
 def _renumerar(resultado: ResultadoOcr, numeros: Sequence[int]) -> None:
     """Reasigna el número real de página a cada página transcrita."""
     from dataclasses import replace
@@ -147,8 +156,10 @@ class Transcriptor:
         palabras es una página con pocas palabras, no una transcripción fallida,
         y descartarla tiraría las tablas bien extraídas del resto.
         """
-        seleccion = sorted(set(paginas)) if paginas is not None else None
-        etiqueta = ",".join(map(str, seleccion)) if seleccion is not None else ""
+        seleccion = (
+            sorted(set(paginas))[: self._policy.max_paginas] if paginas is not None else None
+        )
+        etiqueta = etiqueta_seleccion(seleccion)
         clave = ocr_cache.clave(
             ruta, motor=self._motor.nombre, dpi=self._policy.dpi, seleccion=etiqueta
         )
@@ -168,9 +179,7 @@ class Transcriptor:
                 )
             ]
         else:
-            imagenes = rasterizar_seleccion(
-                ruta, seleccion[: self._policy.max_paginas], dpi=self._policy.dpi
-            )
+            imagenes = rasterizar_seleccion(ruta, seleccion, dpi=self._policy.dpi)
         if not imagenes:
             return None
         resultado = self._motor.extraer([png for _, png in imagenes], idioma=self._policy.idioma)
@@ -267,6 +276,8 @@ def escanear_ocr(origen: Path, profile: Profile, carpeta_cache: Path) -> list[Ca
     except ImportError:  # pragma: no cover
         return []
 
+    from .paginas import seleccionar
+
     candidatos: list[Candidato] = []
     for ruta in sorted(origen.rglob("*.pdf")):
         try:
@@ -276,13 +287,37 @@ def escanear_ocr(origen: Path, profile: Profile, carpeta_cache: Path) -> list[Ca
             texto = limpiar([p.extract_text() or "" for p in lector.pages], profile.cleanup)
         except Exception:  # noqa: BLE001 - un PDF ilegible se reporta en la preparación
             continue
-        if len(texto) >= profile.ocr.min_chars:
+
+        sin_capa = len(texto) < profile.ocr.min_chars
+        # Con `todas` o `con-tablas` el motor corre TAMBIÉN sobre documentos que
+        # sí tienen texto. Saltárselos aquí, como se hacía cuando la única razón
+        # para transcribir era rescatar un escaneo, dejaba el aviso de costo
+        # ciego justo en el modo que más gasta: diría «0 páginas» mientras el
+        # lote factura un dólar por documento.
+        if not sin_capa and not profile.ocr.sobre_capa_de_texto:
             continue
-        clave = ocr_cache.clave(ruta, motor=profile.ocr.motor, dpi=profile.ocr.dpi)
+
+        total = contar_paginas(ruta)
+        if sin_capa:
+            seleccion: Sequence[int] | None = None
+            paginas = min(total, profile.ocr.max_paginas)
+        else:
+            elegidas = sorted(seleccionar(ruta, profile.ocr.paginas, total=total))
+            seleccion = elegidas[: profile.ocr.max_paginas]
+            paginas = len(seleccion)
+            if paginas == 0:
+                continue
+
+        clave = ocr_cache.clave(
+            ruta,
+            motor=profile.ocr.motor,
+            dpi=profile.ocr.dpi,
+            seleccion=etiqueta_seleccion(seleccion),
+        )
         candidatos.append(
             Candidato(
                 ruta=ruta,
-                paginas=min(contar_paginas(ruta), profile.ocr.max_paginas),
+                paginas=paginas,
                 en_cache=ocr_cache.leer(carpeta_cache, clave) is not None,
             )
         )

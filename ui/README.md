@@ -67,7 +67,7 @@ npm run dev              # http://localhost:4321
 | `npm run build` | Compila a `dist/` |
 | `npm run preview` | Sirve `dist/` con `.env` cargado |
 | `npm run check` | Tipos de TypeScript y de los `.astro` |
-| `npm test` | El parser de SSE |
+| `npm test` | El parser de SSE y el renderizador de markdown |
 
 ## Configuración
 
@@ -111,8 +111,36 @@ src/
   pages/index.astro     La portada; resuelve el perfil y su copy
   pages/api/chat.ts     El proxy con passthrough del stream
   components/           Icon, Message, Sources, Chat + la lógica de navegador
+  components/client/markdown.ts   Markdown → nodos del DOM (sin dependencias)
   styles/               tokens.css (la marca) y global.css
 ```
+
+## El markdown de la respuesta
+
+El agente contesta en markdown y la burbuja lo pintaba con `textContent`: una
+tabla llegaba como una reja de pipes y las negritas como asteriscos. Con un
+corpus financiero, donde casi toda respuesta lleva tabla, eso la vuelve
+ilegible.
+
+`components/client/markdown.ts` la renderiza: párrafos, negritas, cursivas,
+código, listas, citas, encabezados y tablas GFM con su alineación.
+
+**Nunca `innerHTML`.** Cada nodo se crea con `createElement` y cada texto se
+asigna con `textContent`, así que el HTML que venga dentro de la respuesta del
+modelo se muestra como texto y no se ejecuta. Es la razón de no usar una
+librería: casi todas emiten una cadena de HTML, y entonces hace falta un
+sanitizador y confiar en que esté bien configurado. Aquí la seguridad no depende
+de una lista de permitidos sino de que la ruta que ejecuta HTML no existe. Dos
+pruebas de `test/markdown.test.ts` lo fijan.
+
+Dos omisiones deliberadas. **Sin enlaces**: las citas van como `[2T26.pdf]` y un
+parser de enlaces empezaría a interpretarlas. Y se renderiza **al cerrar el
+stream, no en cada delta**: reparsear por token hace parpadear la tabla fila a
+fila mientras llega.
+
+Los fragmentos del panel de fuentes siguen en `textContent` a propósito: son
+evidencia verbatim del corpus, y renderizarlos cambiaría lo que el documento
+dice. El botón de copiar también entrega el markdown crudo, que es la fuente.
 
 ## El panel de fuentes
 

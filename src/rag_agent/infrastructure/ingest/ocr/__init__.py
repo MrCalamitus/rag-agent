@@ -24,6 +24,25 @@ sobre que cada afirmación sea rastreable hasta un documento, y un modelo que
 *transcribe* puede completar una cifra ilegible con una plausible. Un error de
 OCR es un error visible y reproducible; una alucinación en la capa de extracción
 es indistinguible de un dato real y contamina el corpus de forma permanente.
+
+**La única excepción prevista, y por qué no contradice lo anterior.** Una gráfica
+rasterizada no tiene capa de texto ni rejilla: Textract devuelve las etiquetas de
+sus ejes —`220 210 200 (8.5%)`— sin relación entre sí, que es ruido con forma de
+dato. Ahí la alternativa a un modelo de visión no es un OCR peor: es *nada*. La
+excepción se admite con tres condiciones: solo sobre regiones de figura, nunca
+sustituyendo texto extraíble, y marcada en `origen_texto` con su confianza para
+que una cifra leída de una gráfica no se cite como una publicada.
+
+**Aún no está conectada a esta ingesta.** Se validó en el laboratorio —sobre la
+gráfica anual de una acción el modelo leyó 172 y 185 contra los 171,52 y 184,57
+que publica la tabla del mismo documento— pero requiere aislar antes las
+regiones de figura, y para eso hace falta pedir `LAYOUT` junto a `TABLES`, que
+hoy no se pide. Queda anotado como la fase siguiente, no como algo hecho.
+
+`OcrPolicy.paginas` decide sobre qué páginas corre el motor. El supuesto
+original —«necesita motor» ⇔ «no tiene capa de texto»— es falso para un informe
+financiero nativo: su capa de texto está completa y aun así devuelve las tablas
+aplanadas.
 """
 
 from __future__ import annotations
