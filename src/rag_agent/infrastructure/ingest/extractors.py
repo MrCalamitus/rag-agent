@@ -14,7 +14,14 @@ esa capa no existe o está cifrada, hay dos recursos antes de darse por vencido:
    propietario vacía —restringen copiar e imprimir, no leer— y su texto está
    ahí, entero. Es el rescate más barato que existe: seis fichas de este corpus
    volvieron con 14.000-19.000 caracteres cada una sin transcribir nada.
-2. **Transcribir.** Solo si de verdad no hay texto. Ver `ocr/`.
+2. **Transcribir.** Ver `ocr/`.
+
+Y una tercera vía que no es un rescate sino una mejora: aunque la capa de texto
+exista y esté completa, `pypdf` devuelve las tablas aplanadas —una columna de
+cifras sin fila ni encabezado—. Con `ocr.paginas` en `todas` o `con-tablas` el
+motor corre también ahí y sustituye **página a página** a la capa nativa. Esa
+sustitución es por página y no por documento: lo que no se selecciona conserva
+el texto nativo, que es gratis y exacto.
 """
 
 from __future__ import annotations

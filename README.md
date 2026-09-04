@@ -170,12 +170,18 @@ de coste antes de rendirse, y dice siempre cuál usó:
 2. **Descifrar.** Muchos PDF corporativos vienen cifrados con contraseña de
    propietario vacía —restringen copiar e imprimir, no leer— y su texto está
    entero. Es el rescate más barato que existe.
-3. **Transcribir.** Solo si de verdad no hay texto, y solo si el perfil lo pide.
+3. **Transcribir.** Cuándo lo decide el perfil con `ocr.paginas`: solo si no hay
+   texto (`sin-texto`, el valor por defecto), en toda página (`todas`) o solo en
+   las que llevan tabla (`con-tablas`). Los dos últimos existen porque «tener
+   capa de texto» y «poder leer la tabla» no son lo mismo: un informe financiero
+   nativo devuelve sus tablas aplanadas en una columna de cifras sin fila ni
+   encabezado.
 
 ```yaml
 # profiles/coches.yaml
 ocr:
   motor: tablas       # ninguno | tablas | texto
+  paginas: sin-texto  # sin-texto | todas | con-tablas
   dpi: 200
   max_paginas: 20
   min_chars_por_pagina: 200
@@ -193,9 +199,10 @@ dentro para que el troceado no deje cifras huérfanas de su columna. Es lo que
 permite apuntar el pipeline a un corpus que nadie ha revisado sin que invente
 relaciones entre datos.
 
-Antes de transcribir nada, `make corpus` enseña cuántas páginas va a procesar y
-cuánto cuesta; el resultado se cachea por contenido del archivo, así que
-reajustar el troceado no vuelve a pagarlo. Una transcripción demasiado pobre para
+El motor cuesta dinero, así que `make corpus` **no lo activa solo**: hace falta
+`make corpus PROFILE=… OCR=1`. Antes de transcribir nada enseña cuántas páginas
+va a procesar y cuánto cuesta; el resultado se cachea por contenido del archivo
+y por las páginas pedidas, así que reajustar el troceado no vuelve a pagarlo. Una transcripción demasiado pobre para
 ser evidencia —un folleto cuyas páginas son mapas— se descarta con su motivo en
 vez de indexarse como ruido.
 
@@ -383,6 +390,7 @@ cuando ECS *acepta* la nueva definición, no cuando la tarea nueva *sirve*.
 # 4. Preparar el corpus de cada tema e ingestarlo en su Knowledge Base
 pip install -e ".[ingest]"      # dependencias de la ingesta (no van en la imagen)
 make corpus PROFILE=coches      # PDFs → fragmentos + metadatos
+make corpus PROFILE=coches OCR=1  # ídem, activando el motor de extracción
 make sync-kb PROFILE=coches     # sube a s3://…/coches/ y lanza la ingesta
 
 # 5. Verificar contra el despliegue

@@ -118,7 +118,8 @@ src/rag_agent/
 │   ├── container.py            # composición de dependencias
 │   ├── profiles/               # carga de profiles/*.yaml y registro de temas
 │   ├── ingest/                 # originales → fragmentos + metadatos
-│   │   └── ocr/                # rescate de PDFs sin capa de texto
+│   │   ├── paginas.py          # qué páginas necesitan extracción con estructura
+│   │   └── ocr/                # motor de extracción: Textract o tesseract
 │   ├── inbound/
 │   │   ├── http/               # FastAPI, esquema, SSE, auth, límite de tasa
 │   │   └── cli/                # menú interactivo y asistente de configuración
@@ -197,6 +198,15 @@ Un corpus real trae documentos ilegibles, y descartarlos en silencio deja
 preguntas que el agente declinará para siempre sin que nadie sepa por qué. La
 ingesta intenta tres cosas en orden de coste: leer la capa de texto, descifrar
 el PDF si viene con contraseña de propietario vacía, y transcribirlo.
+
+Cuándo entra el motor lo decide `ocr.paginas` en el perfil, y no la ausencia de
+texto. La equivalencia «necesita motor» ⇔ «no tiene capa de texto» es cierta
+para un folleto escaneado y falsa para un informe financiero nativo: su capa de
+texto está completa y aun así `pypdf` devuelve las tablas aplanadas en una
+columna de cifras sin fila ni encabezado, que no es un fallo visible sino texto
+que parece legítimo. Con `todas` o `con-tablas` el motor corre también ahí y su
+versión sustituye **página a página** a la nativa; el resto conserva la nativa,
+que es gratis y exacta.
 
 El protocolo `MotorOcr` vive en `ingest/ocr/` y **no** en `application/ports.py`:
 el servicio nunca hace OCR. Meter en los puertos del núcleo algo que el núcleo
