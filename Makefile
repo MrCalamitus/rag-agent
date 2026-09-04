@@ -89,6 +89,11 @@ sync-kb: ## Sube el corpus de un tema a S3 y lanza la ingesta (PROFILE=slug)
 	@test -n "$$PROFILE" -o -n "$$CORPUS" || (echo "Uso: make sync-kb PROFILE=autos" && exit 1)
 	RAG_PROFILE=$$PROFILE ./scripts/sync-kb.sh $$CORPUS
 
+.PHONY: indice
+indice: .venv ## Genera indice-*.md del corpus con un LLM (PROFILE=slug; FORCE=1 regenera)
+	@test -n "$$PROFILE" || (echo "Uso: make indice PROFILE=finanzas [FORCE=1]" && exit 1)
+	$(PY) scripts/generar_indice.py --profile $$PROFILE $${FORCE:+--force}
+
 .PHONY: sync-originales
 sync-originales: ## Sube los documentos originales que el tema expone (PROFILE=slug)
 	@test -n "$$PROFILE" || (echo "Uso: make sync-originales PROFILE=autos" && exit 1)
