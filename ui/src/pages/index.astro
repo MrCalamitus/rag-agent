@@ -44,7 +44,7 @@ const intro =
   (profile ? `Respondo sobre ${profile.subject}, y solo con lo que consta en los documentos.` : "");
 
 // Las sugerencias se derivan del tema: en `autos` invitan a preguntar por una
-// versión, en `luis-cv` por una credencial. Son texto de arranque, no un menú.
+// versión, en `cv` por una credencial. Son texto de arranque, no un menú.
 const suggestions = profile
   ? [
       `¿Qué documentación hay disponible sobre ${shorten(profile.subject)}?`,

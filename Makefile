@@ -32,7 +32,13 @@ estado: .venv ## Qué está configurado y qué falta
 
 .PHONY: run
 run: .venv ## Levanta la API en local (adaptadores locales, sin AWS)
-	.venv/bin/uvicorn rag_agent.main:app --reload --port 8080
+	$(PY) -m uvicorn rag_agent.main:app --reload --port 8080
+
+.PHONY: demo
+demo: .venv ## API en local con el corpus de prueba: sin AWS, sin documentos propios
+	RAG_RETRIEVAL_BACKEND=local RAG_INFERENCE_BACKEND=stub \
+	RAG_CORPUS_DIR=tests/fixtures/corpus RAG_DEFAULT_PROFILE=cv \
+		$(PY) -m uvicorn rag_agent.main:app --port 8080
 
 .PHONY: test
 test: .venv ## Suite completa en local: contrato + RAG + operación
@@ -48,7 +54,7 @@ test-rag: .venv ## Solo los casos C: recuperación y veracidad
 
 .PHONY: test-real
 test-real: .venv ## Casos C contra el modelo real de Bedrock (usa .env)
-	AWS_PROFILE=$${AWS_PROFILE:-luis} RAG_INFERENCE_BACKEND=bedrock $(PY) -m pytest -q tests/rag
+	AWS_PROFILE=$${AWS_PROFILE:-default} RAG_INFERENCE_BACKEND=bedrock $(PY) -m pytest -q tests/rag
 
 .PHONY: test-deployed
 test-deployed: .venv ## La misma suite contra el ALB (exige BASE_URL y API_TOKEN)
@@ -91,7 +97,7 @@ sync-kb: ## Sube el corpus de un tema a S3 y lanza la ingesta (PROFILE=slug)
 
 .PHONY: indice
 indice: .venv ## Genera indice-*.md del corpus con un LLM (PROFILE=slug; FORCE=1 regenera)
-	@test -n "$$PROFILE" || (echo "Uso: make indice PROFILE=finanzas [FORCE=1]" && exit 1)
+	@test -n "$$PROFILE" || (echo "Uso: make indice PROFILE=<slug> [FORCE=1]" && exit 1)
 	$(PY) scripts/generar_indice.py --profile $$PROFILE $${FORCE:+--force}
 
 .PHONY: sync-originales

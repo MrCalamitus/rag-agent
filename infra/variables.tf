@@ -11,7 +11,7 @@ variable "aws_account_id" {
 variable "aws_profile" {
   description = "Perfil de credenciales locales."
   type        = string
-  default     = "luis"
+  default     = "default"
 }
 
 variable "aws_region" {

@@ -1,7 +1,7 @@
 # Red mínima y cerrada: el ALB en subredes públicas, las tareas en privadas, y
 # **sin NAT Gateway**. Todo el tráfico hacia AWS sale por PrivateLink.
 #
-# Esto no es una optimización de costo, aunque también lo sea: la bitácora §2
+# Esto no es una optimización de costo, aunque también lo sea: el diseño
 # descartó un router de modelos externo por no exponer datos a internet
 # público. Con NAT, la llamada de Fargate a Bedrock saldría a internet y ese
 # argumento se caería solo. Con endpoints, el tráfico nunca abandona la red de

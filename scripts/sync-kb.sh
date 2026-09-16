@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Sube el corpus preparado de un tema a su prefijo en S3 y lanza su ingesta.
 #
-#   ./scripts/sync-kb.sh coches                 # usa la carpeta del perfil
-#   ./scripts/sync-kb.sh coches /ruta/al/corpus # o una explícita
-#   make sync-kb PROFILE=coches
+#   ./scripts/sync-kb.sh autos                  # usa la carpeta del perfil
+#   ./scripts/sync-kb.sh autos  /ruta/al/corpus # o una explícita
+#   make sync-kb PROFILE=autos
 #
 # Sube SOLO la carpeta del corpus preparado, nunca la de documentos originales:
 # lo que entra a S3 es lo que el agente puede llegar a recitar.

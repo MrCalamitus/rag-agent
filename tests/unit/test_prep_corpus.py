@@ -128,7 +128,7 @@ def test_un_documento_largo_se_trocea_y_los_ids_lo_reflejan(tmp_path):
 
 
 def test_un_documento_corto_conserva_su_id_sin_sufijo():
-    perfil = load_profiles(RAIZ / "profiles")["luis-cv"].profile
+    perfil = load_profiles(RAIZ / "profiles")["cv"].profile
 
     reporte = preparar(FIXTURES, perfil)
 

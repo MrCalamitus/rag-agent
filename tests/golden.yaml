@@ -15,7 +15,7 @@
 version: 1
 # Tema contra el que se evalúa. Cada tema tiene su propio archivo de oro:
 # las preguntas de credenciales no dicen nada de un corpus de fichas técnicas.
-perfil: luis-cv
+perfil: cv
 corpus: tests/fixtures/corpus
 
 preguntas:

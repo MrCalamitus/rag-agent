@@ -67,8 +67,8 @@ def test_los_perfiles_del_repositorio_son_validos(tmp_path):
     """Guarda contra editar un YAML y romper el arranque sin enterarse."""
     perfiles = load_profiles("profiles")
 
-    assert {"luis-cv", "autos"} <= set(perfiles)
-    assert perfiles["luis-cv"].profile.masks_identifiers
+    assert {"cv", "autos"} <= set(perfiles)
+    assert perfiles["cv"].profile.masks_identifiers
     assert not perfiles["autos"].profile.masks_identifiers
 
 
@@ -210,7 +210,7 @@ def test_un_corpus_explicito_gana_al_declarado_por_el_perfil(tmp_path):
     (tmp_path / "explicito").mkdir()
     (tmp_path / "explicito" / "doc.md").write_text("Contenido explícito.", encoding="utf-8")
     ajustes = Settings(
-        profiles_dir="profiles", default_profile="luis-cv",
+        profiles_dir="profiles", default_profile="cv",
         corpus_dir=str(tmp_path / "explicito"), environment="local", _env_file=None,
     )
     perfiles = build_profiles(ajustes)
@@ -226,7 +226,7 @@ def test_las_rutas_del_perfil_expanden_la_virgulilla():
     from rag_agent.infrastructure.container import build_knowledge_bases, build_profiles
 
     ajustes = Settings(
-        profiles_dir="profiles", default_profile="luis-cv", environment="local", _env_file=None
+        profiles_dir="profiles", default_profile="cv", environment="local", _env_file=None
     )
     perfiles = build_profiles(ajustes)
 
@@ -324,9 +324,9 @@ def test_un_fragmento_sin_clase_no_se_expone():
 
 
 def test_los_perfiles_del_repositorio_declaran_su_postura():
-    """`autos` es material publicado; `luis-cv` son credenciales."""
+    """`autos` es material publicado; `cv` son credenciales."""
     perfiles = load_profiles("profiles")
 
     assert perfiles["autos"].profile.exposes_documents
     assert perfiles["autos"].profile.documents.clasificar(ruta="toyota/hilux.pdf") == "publico"
-    assert not perfiles["luis-cv"].profile.exposes_documents
+    assert not perfiles["cv"].profile.exposes_documents

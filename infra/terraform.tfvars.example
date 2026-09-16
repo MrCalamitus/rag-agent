@@ -2,7 +2,7 @@
 # el account ID no se commitea.
 
 aws_account_id = "000000000000"
-aws_profile    = "luis"
+aws_profile    = "default"
 aws_region     = "us-east-1"
 
 # Sin certificado el ALB sirve HTTP en claro: vale para verificar el despliegue,

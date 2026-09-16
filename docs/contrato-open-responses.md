@@ -316,8 +316,7 @@ llevar el prefijo del slug del implementador.
 Consecuencia práctica: **cualquier respuesta del agente es auditable a
 posteriori sin abrir un log**. Quien consume el endpoint ve la evidencia que
 sustentó la respuesta en la misma carga útil. Esto convierte la observabilidad
-de la §5 de la bitácora en algo que el cliente puede verificar, no solo el
-operador.
+en algo que el cliente puede verificar, no solo el operador.
 
 ---
 

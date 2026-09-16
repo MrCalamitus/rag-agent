@@ -25,7 +25,7 @@ from rag_agent.infrastructure.inbound.cli.init import (
 PROYECTO = Proyecto(
     nombre="rag-coches",
     entorno="prod",
-    aws_profile="luis",
+    aws_profile="default",
     aws_account="123456789012",
     aws_region="us-east-1",
     api_token="token-local",

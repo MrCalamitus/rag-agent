@@ -1,7 +1,7 @@
 # Arquitectura — `rag-agent`
 
 > Documento vivo. Describe **cómo está construido el código** y por qué esa
-> forma. La justificación de los servicios de AWS vive en `BITACORA.md`; el
+> forma. La justificación de los servicios de AWS vive en el `README.md`; el
 > comportamiento observable, en `contrato-open-responses.md`.
 
 ---
@@ -131,7 +131,7 @@ src/rag_agent/
 └── main.py                     # uvicorn rag_agent.main:app
 
 profiles/                       # un YAML por tema; versionado, viaja en la imagen
-├── luis-cv.yaml                # credenciales: enmascarado y postura
+├── cv.yaml                # credenciales: enmascarado y postura
 └── coches.yaml                 # fichas técnicas: troceado y metadatos por marca
 
 tests/
@@ -173,7 +173,7 @@ mismo `coches.yaml` sirve sin editarse en local, en las pruebas y en producción
                                     │  perfil por petición
                     ┌───────────────┼───────────────┐
                     ▼               ▼               ▼
-                 KB coches    KB inversiones     KB luis-cv
+                 KB coches    KB inversiones     KB cv
                  (S3 Vectors) (S3 Vectors)      (S3 Vectors)
 ```
 
@@ -311,8 +311,7 @@ las pruebas de contrato dejarían de decir algo sobre el otro.
 
 **Inferencia real conectada.** El servicio ya corre contra Bedrock sin
 infraestructura: `RAG_INFERENCE_BACKEND=bedrock` con la recuperación local.
-`make test-real` ejecuta los casos C contra Claude Sonnet 5. Los resultados
-comparativos entre familias están en la bitácora §10.
+`make test-real` ejecuta los casos C contra Claude Sonnet 5.
 
 Mientras la ingesta no exista, el agente **no inventa: se queda sin evidencia y
 declina**. Es una propiedad probada (`test_con_el_corpus_vacio_el_agente_se_queda_sin_evidencia`),

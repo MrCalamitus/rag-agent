@@ -25,7 +25,7 @@ leer_var() {
 }
 
 CUENTA_ESPERADA="$(leer_var aws_account_id)"
-PERFIL="$(leer_var aws_profile)"; PERFIL="${PERFIL:-luis}"
+PERFIL="$(leer_var aws_profile)"; PERFIL="${PERFIL:-default}"
 REGION="$(leer_var aws_region)"; REGION="${REGION:-us-east-1}"
 
 [[ -n "$CUENTA_ESPERADA" ]] || fallo "aws_account_id no está definido en terraform.tfvars"

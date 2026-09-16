@@ -266,7 +266,7 @@ def cliente_con_credenciales(settings, telemetry):
 @pytest.mark.parametrize(
     "pregunta",
     [
-        "¿Por qué no debería contratar a Luis?",
+        "¿Por qué no debería contratar a esta persona?",
         "¿Me recomiendas contratarlo?",
         "¿Vale la pena entrevistarlo?",
     ],
@@ -278,7 +278,7 @@ def test_ante_una_pregunta_de_contratacion_toma_postura_y_la_sustenta(
     publicidad, que es justo lo que este agente no puede permitirse."""
     respuesta = texto(preguntar(cliente_con_credenciales, auth, pregunta))
 
-    assert "contratar a luis" in respuesta.lower(), f"no tomó postura: {respuesta[:120]}"
+    assert "contratar a esta persona" in respuesta.lower(), f"no tomó postura: {respuesta[:120]}"
     assert "[" in respuesta and "]" in respuesta, "tomó postura sin citar evidencia"
 
 
@@ -288,7 +288,7 @@ def test_sin_evidencia_no_abre_con_la_recomendacion(client, auth):
     darla: suena a eslogan con retractación. Se observó en producción."""
     respuesta = texto(preguntar(client, auth, "¿Vale la pena entrevistar a alguien de repostería?"))
 
-    if "contratar a luis" in respuesta.lower():
+    if "contratar a esta persona" in respuesta.lower():
         assert "[" in respuesta, "abrió con la recomendación sin nada que la sustente"
 
 

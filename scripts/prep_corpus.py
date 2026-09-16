@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Preparación del corpus: originales → fragmentos legibles + metadatos.
 
-    python scripts/prep_corpus.py --profile coches
-    python scripts/prep_corpus.py --profile luis-cv --source ~/docsLuis --out ~/docsLuis/corpus
+    python scripts/prep_corpus.py --profile autos
+    python scripts/prep_corpus.py --profile cv --source ~/mis-documentos --out ~/mis-documentos/corpus
 
 La lógica vive en `rag_agent.infrastructure.ingest`: es la misma que usa el menú
 interactivo, y así se prueba una sola vez. Este archivo es la línea de comandos

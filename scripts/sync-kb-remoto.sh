@@ -6,8 +6,8 @@
 # lo uno ni lo otro: recibe todo por entorno. A cambio se lleva a otro servidor
 # como archivo suelto.
 #
-#   RAG_S3_BUCKET=... RAG_KB_ID=... RAG_DS_ID=... ./sync-kb-remoto.sh finanzas ./corpus-preparado
-#   RAG_ENV_FILE=~/rag-finanzas.env ./sync-kb-remoto.sh
+#   RAG_S3_BUCKET=... RAG_KB_ID=... RAG_DS_ID=... ./sync-kb-remoto.sh autos ./corpus-preparado
+#   RAG_ENV_FILE=~/rag-autos.env ./sync-kb-remoto.sh
 #
 # Variables (obligatorias salvo donde se indique):
 #
@@ -31,7 +31,7 @@
 #
 # Para generar ese archivo desde la máquina que sí tiene el estado:
 #
-#   TEMA=finanzas
+#   TEMA=autos
 #   { echo "RAG_TEMA=$TEMA"
 #     echo "RAG_AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)"
 #     echo "RAG_S3_BUCKET=$(terraform -chdir=infra output -raw corpus_bucket)"

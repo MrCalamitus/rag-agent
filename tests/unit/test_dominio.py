@@ -193,7 +193,7 @@ def test_se_reconocen_las_formas_de_negacion_de_un_modelo_real(respuesta):
     [
         "Sí, cuenta con certificación CISSP vigente [doc.md].",
         "Está titulado como Ingeniero en Computación [titulo.md].",
-        "Debes contratar a Luis. Su maestría lo respalda [cedula.md].",
+        "Debes contratar a esta persona. Su maestría lo respalda [cedula.md].",
     ],
 )
 def test_una_afirmacion_no_se_confunde_con_una_negacion(respuesta):

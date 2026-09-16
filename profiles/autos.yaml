@@ -69,7 +69,7 @@ banned_markers: []
 # Aquí todo: son folletos y fichas que las marcas publican para que se lean.
 # Poner `por_defecto: publico` significa que un PDF nuevo entra expuesto sin
 # que nadie lo clasifique — que es exactamente lo que se quiere en un corpus
-# de material promocional, y exactamente lo que NO se quiere en `luis-cv`.
+# de material promocional, y exactamente lo que NO se quiere en `cv`.
 documentos:
   por_defecto: publico
   expone: [publico]

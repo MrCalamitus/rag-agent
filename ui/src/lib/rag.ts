@@ -73,7 +73,7 @@ export function createResponseStream(
       input,
       stream: true,
       store: false,
-      // Nunca se piden identificadores en claro. En el perfil `luis-cv` el
+      // Nunca se piden identificadores en claro. En el perfil `cv` el
       // corpus lleva CURP y cédulas, y una UI pública no es "petición explícita
       // y autenticada" de nadie.
       reveal_identifiers: false,

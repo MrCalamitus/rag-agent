@@ -4,7 +4,7 @@
 
 El agente RAG solo se puede usar hoy por HTTP (`POST /v1/responses`) o por el menú de
 terminal (`src/rag_agent/infrastructure/inbound/cli/menu.py`). No existe ninguna pieza
-web en el repositorio: cero HTML, cero tooling de node. `docs/PLAN.md` lo dice
+web en el repositorio: cero HTML, cero tooling de node. El plan original lo decía
 explícitamente — *"Decisión cerrada #1: Sin frontend. Solo endpoint"*. Este plan revierte
 esa decisión **sin tocar el backend**: añade una UI de chat en Astro que vive en `ui/`,
 se despliega aparte y puede borrarse entera sin dejar rastro en `src/`, `infra/` ni en
@@ -244,12 +244,7 @@ Solo tres, todos aditivos y reversibles:
 
 ## Dónde se documenta
 
-`docs/PLAN.md` ya existe como archivo, así que en un macOS con APFS insensible a
-mayúsculas **no se puede crear un directorio `docs/plan/`**: colisionaría. El plan va
-por tanto en **`docs/plan-ui-astro.md`** (este documento, adaptado), y en `docs/PLAN.md`
-se añade una nota corta donde vive la *"Decisión cerrada #1: Sin frontend"* señalando que
-se revierte, con enlace al nuevo archivo y la razón (la UI no vive en el servicio, vive
-aparte).
+El plan va en **`docs/plan-ui-astro.md`** (este documento).
 
 ## Verificación de punta a punta
 
@@ -276,7 +271,7 @@ aparte).
    con `curl -N` contra el backend local, incluyendo frames partidos y la ruta
    `error` → `response.failed` → `[DONE]`.
 8. **Producción**: `npm run build && node ./dist/server/entry.mjs` con
-   `RAG_API_BASE_URL` apuntando al ALB y `RAG_PROFILE=luis-cv`; repetir el paso 3.
+   `RAG_API_BASE_URL` apuntando al ALB y `RAG_PROFILE=cv`; repetir el paso 3.
 9. **No regresión del backend**: `make test` debe seguir verde y su salida idéntica —
    ningún archivo de `src/` ni de `tests/` cambia.
 
@@ -289,7 +284,7 @@ aparte).
   Astro.
 - **La UI queda sin autenticación propia.** Quien alcance el host de Astro puede
   preguntar. Si eso importa, el sitio para poner la puerta es `api/chat.ts`.
-- **El perfil `luis-cv` enmascara identificadores**; la UI nunca envía
+- **El perfil `cv` enmascara identificadores**; la UI nunca envía
   `reveal_identifiers: true`.
 
 ---
@@ -308,7 +303,7 @@ Implementado y verificado el 2026-09-02. Todo bajo `ui/`; el backend no cambió.
 - `ui/README.md` — cómo arrancarla, cómo desplegarla y qué mirar antes de abrirla.
 
 Fuera de `ui/`: cuatro objetivos `ui-*` en el `Makefile`, cuatro líneas en
-`.gitignore`, la nota en `docs/PLAN.md` y este documento.
+`.gitignore` y este documento.
 
 **Dos hallazgos durante la implementación**, ambos ya resueltos arriba: el token se
 horneaba en `dist/` al leerlo por `import.meta.env`, y `RAG_CORPUS_DIR` en el `.env` de
@@ -382,9 +377,9 @@ clase que no existe es un error duro y no un silencio.
 | Perfil | `por_defecto` | `expone` | Por qué |
 |---|---|---|---|
 | `autos` | `publico` | `[publico]` | Folletos y fichas que las marcas publican para que se lean. Un PDF nuevo entra expuesto sin que nadie lo clasifique |
-| `luis-cv` | `identidad` | `[]` | Credenciales. Entregar el archivo anularía el enmascarado: daría íntegro, en un PDF, el número que la respuesta tapa con asteriscos |
+| `cv` | `identidad` | `[]` | Credenciales. Entregar el archivo anularía el enmascarado: daría íntegro, en un PDF, el número que la respuesta tapa con asteriscos |
 
-El YAML de `luis-cv` deja escrito, comentado, qué habría que añadir para abrir el
+El YAML de `cv` deja escrito, comentado, qué habría que añadir para abrir el
 CV —el único documento de ese corpus que su dueño reparte él mismo—. Es una
 decisión suya, no una que herede de un defecto.
 

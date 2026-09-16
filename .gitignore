@@ -146,7 +146,7 @@ vite.config.ts.timestamp-*
 .DS_Store
 .history
 
-# ---- luis-cv (Python / AWS) ----
+# ---- rag-agent (Python / AWS) ----
 # Documentos de identidad: fuera de git, no negociable.
 corpus/*
 !corpus/.gitkeep

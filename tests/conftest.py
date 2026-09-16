@@ -35,7 +35,7 @@ def settings() -> Settings:
         aws_region=os.getenv("RAG_AWS_REGION", "us-east-1"),
         corpus_dir=str(CORPUS),
         profiles_dir=str(PERFILES),
-        default_profile="luis-cv",
+        default_profile="cv",
         rate_limit_per_minute=20,
         _env_file=None,
     )

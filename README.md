@@ -2,7 +2,7 @@
 
 Agente RAG **auditable y reutilizable**: se apunta a una carpeta de documentos,
 se declara un tema en un YAML y queda un endpoint compatible con **Open
-Responses** desplegado en AWS con arquitectura de grado bancario.
+Responses** desplegado en AWS con una arquitectura pensada para entornos regulados.
 
 ---
 
@@ -33,8 +33,8 @@ Cambiar de dominio no es tocar Python.
 
 | Tema | Corpus | Particularidad |
 |---|---|---|
-| `luis-cv` | Títulos, cédulas y constancias | Enmascara CURP, RFC y teléfonos; postura sustentada ante preguntas de contratación |
-| `coches` | 123 fichas técnicas y folletos de 14 marcas | Trocea documentos largos; deduce `marca` de la carpeta; transcribe los PDF de imagen conservando la tabla |
+| `cv` | Títulos, cédulas y constancias | Enmascara CURP, RFC y teléfonos; postura sustentada ante preguntas de contratación |
+| `autos` | Fichas técnicas y folletos de marcas de coches | Trocea documentos largos; deduce `marca` de la carpeta; transcribe los PDF de imagen conservando la tabla |
 
 El despliegue sirve **todos los temas a la vez**: se comparte el plano de cómputo
 —VPC, ALB, ECS, endpoints— y se duplica solo la Knowledge Base, que sobre S3
@@ -45,17 +45,56 @@ Vectors cuesta centavos. Añadir un tema son dos minutos de `apply`, no otros
 
 ## Empezar
 
+### Requisitos
+
+| Para | Necesitas |
+|---|---|
+| Probar en local | Python ≥ 3.11 y `make` |
+| Preparar un corpus | Lo anterior. Con `OCR=1`, `motor: tablas` usa Amazon Textract (credenciales de AWS) y `motor: texto` usa tesseract instalado en local |
+| Desplegar | AWS CLI con un perfil configurado, Terraform ≥ 1.9, Docker y acceso concedido en Bedrock a los modelos del mapa de alias |
+| La interfaz web | Node ≥ 22.9, por `--env-file-if-exists` (ver `ui/README.md`) |
+
+### 1. Probarlo en cinco minutos, sin AWS
+
 ```bash
-make install     # entorno y dependencias
+git clone <url-del-repo> rag-agent && cd rag-agent
+make install     # crea .venv e instala dependencias
+make test        # suite completa en local, sin red ni credenciales
+make demo        # API en http://localhost:8080 con el corpus de prueba
+```
+
+`make demo` usa `tests/fixtures/corpus`, cuatro documentos ficticios de una
+«Persona de Prueba», y un modelo local determinista. En otra terminal:
+
+```bash
+curl -s -X POST http://localhost:8080/v1/responses \
+  -H "Authorization: Bearer local-dev-token" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "agente-rag-sonnet", "input": "¿Tiene título de ingeniería?"}'
+```
+
+La respuesta cita `titulo-ingenieria-sistemas-2019.md`. Si ves «Eso no consta en
+los documentos disponibles», el servicio no encontró el corpus: revisa que
+`RAG_CORPUS_DIR` no esté fijado a otra carpeta en tu `.env`.
+
+### 2. Configurar tu propio proyecto
+
+```bash
 make menu        # menú interactivo: configurar, preparar, probar, desplegar
 ```
 
-El menú recoge los nombres y variables del proyecto —cuenta de AWS, región,
-prefijo de recursos, primer tema— y escribe `.env`, `infra/terraform.tfvars` y
-`profiles/<tema>.yaml`. Nada de eso está escrito en el código.
+El menú recoge los nombres y variables del proyecto —perfil y cuenta de AWS,
+región, prefijo de recursos, primer tema— y escribe `.env`,
+`infra/terraform.tfvars` y `profiles/<tema>.yaml`. Ninguno de los dos primeros
+se versiona. Si prefieres hacerlo a mano:
+
+```bash
+cp .env.example .env
+cp infra/terraform.tfvars.example infra/terraform.tfvars   # aws_account_id y aws_profile
+```
 
 ```
-  Agente RAG  ·  rag-coches  ·  tema: coches  · local/stub
+  Agente RAG  ·  rag-autos  ·  tema: autos  · local/stub
   ────────────────────────────────────────────────────────────────────
 
   1) Inicializar el proyecto ......... nombres, cuenta AWS y primer tema
@@ -73,6 +112,16 @@ Cada opción tiene su equivalente suelto (`make init`, `make corpus PROFILE=…`
 `make deploy`, `make estado`); el menú existe porque reutilizar el agente en un
 tema nuevo son cinco pasos encadenados y la mitad de los errores de despliegue
 son creer que ya se hizo el anterior.
+
+### 3. Añadir un tema con tus documentos
+
+1. Copia `profiles/autos.yaml` (corpus público) o `profiles/cv.yaml` (corpus con
+   datos personales) a `profiles/<tu-tema>.yaml` y reescribe `slug`, `name`,
+   `subject` y `corpus.source`.
+2. Pon los PDF en la carpeta de `corpus.source`. Un tema que enmascara
+   identificadores **no puede** preparar su corpus dentro del repositorio: usa
+   una carpeta fuera del árbol de trabajo.
+3. `make corpus PROFILE=<tu-tema>` y después `make run`.
 
 ---
 
@@ -178,7 +227,7 @@ de coste antes de rendirse, y dice siempre cuál usó:
    encabezado.
 
 ```yaml
-# profiles/coches.yaml
+# profiles/autos.yaml
 ocr:
   motor: tablas       # ninguno | tablas | texto
   paginas: sin-texto  # sin-texto | todas | con-tablas
@@ -217,12 +266,12 @@ Todas las peticiones van a `POST /v1/responses` con
 
 ```bash
 curl -s "$BASE_URL/v1/profiles" -H "Authorization: Bearer $API_TOKEN"
-# {"default":"coches","data":[{"id":"coches",…},{"id":"luis-cv",…}]}
+# {"default":"autos","data":[{"id":"autos",…},{"id":"cv",…}]}
 
 curl -X POST "$BASE_URL/v1/responses" \
   -H "Authorization: Bearer $API_TOKEN" \
   -H "Content-Type: application/json" \
-  -H "X-Rag-Profile: coches" \
+  -H "X-Rag-Profile: autos" \
   -d '{"model": "agente-rag-sonnet", "input": "¿Qué motorización tiene la Hilux?"}'
 ```
 
@@ -360,24 +409,20 @@ curl "$BASE_URL/readyz"    # verifica Bedrock y KB alcanzables
 
 ## Despliegue
 
-### Requisitos
-
-- AWS CLI con el perfil `luis` configurado
-- Terraform ≥ 1.6, Docker, Python ≥ 3.11
-- Acceso concedido en Bedrock a los modelos del mapa de alias
+Requisitos en la tabla de [Empezar](#requisitos).
 
 ### Pasos
 
 ```bash
-# 1. Verificar identidad y cuenta destino
-aws sts get-caller-identity --profile luis
+# 1. Verificar identidad y cuenta destino (usa tu perfil de AWS)
+aws sts get-caller-identity --profile <tu-perfil>
 
-# 2. Configurar (terraform.tfvars está en .gitignore)
+# 2. Configurar, si no lo hizo ya `make menu` (terraform.tfvars está en .gitignore)
 cp infra/terraform.tfvars.example infra/terraform.tfvars
-# editar: aws_account_id · opcional: certificate_arn para HTTPS
+# editar: aws_account_id y aws_profile · opcional: certificate_arn para HTTPS
 
 # 3. Infraestructura y aplicación, en un solo paso
-./scripts/deploy.sh
+make deploy
 ```
 
 `deploy.sh` hace el recorrido completo en orden: guarda de cuenta, verificación
@@ -388,10 +433,9 @@ cuando ECS *acepta* la nueva definición, no cuando la tarea nueva *sirve*.
 
 ```bash
 # 4. Preparar el corpus de cada tema e ingestarlo en su Knowledge Base
-pip install -e ".[ingest]"      # dependencias de la ingesta (no van en la imagen)
-make corpus PROFILE=coches      # PDFs → fragmentos + metadatos
-make corpus PROFILE=coches OCR=1  # ídem, activando el motor de extracción
-make sync-kb PROFILE=coches     # sube a s3://…/coches/ y lanza la ingesta
+make corpus PROFILE=autos       # PDFs → fragmentos + metadatos
+make corpus PROFILE=autos OCR=1 # ídem, activando el motor de extracción
+make sync-kb PROFILE=autos      # sube a s3://…/autos/ y lanza la ingesta
 
 # 5. Verificar contra el despliegue
 export BASE_URL=$(terraform -chdir=infra output -raw base_url)
@@ -415,9 +459,9 @@ previene en dos capas.
 
 | Variable | Default | Descripción |
 |---|---|---|
-| `aws_profile` | `luis` | Perfil de la máquina que despliega |
+| `aws_profile` | `default` | Perfil de credenciales de la máquina que despliega |
 | `aws_account_id` | — | Requerido. Guarda de cuenta destino |
-| `aws_region` | — | Región de despliegue |
+| `aws_region` | `us-east-1` | Región de despliegue |
 | `project` | `rag-agent` | Prefijo y tag de todos los recursos |
 | `environment` | `prod` | Sufijo de nombres |
 | `default_profile` | *(primero)* | Tema usado sin cabecera `X-Rag-Profile` |
@@ -465,13 +509,9 @@ Cero credenciales inventadas y cero identificadores filtrados en los 42 casos.
 Los fallos de GPT son todos de citación: recupera y responde bien, pero no cita
 el documento — y aquí la cita no es formato, es el mecanismo de no-repudio.
 
-El servicio también corre **sin AWS**, con recuperación sobre `corpus/` y un
-modelo local determinista, que es como corre la suite completa en dos segundos:
-
-```bash
-make install        # entorno de desarrollo
-make run            # API en http://localhost:8080, sin AWS ni credenciales
-```
+El servicio también corre **sin AWS**, con recuperación local y un modelo
+determinista, que es como corre la suite completa en segundos (ver
+[Empezar](#1-probarlo-en-cinco-minutos-sin-aws)).
 
 ---
 
@@ -555,7 +595,7 @@ Que el almacén vectorial no aparezca en esa lista es el resultado de la
 decisión más rentable del proyecto: OpenSearch Serverless factura unidades de
 cómputo de forma continua —del orden de 350 USD al mes de piso— mientras que
 S3 Vectors cobra por almacenamiento y consulta, y con diez documentos eso son
-céntimos. La comparación con números está en la bitácora §12.
+céntimos.
 
 Los endpoints son caros a propósito: sin ellos el tráfico a Bedrock saldría por
 internet y el argumento de soberanía del dato se caería solo. Si el presupuesto
@@ -577,10 +617,6 @@ Cada documento responde una pregunta distinta:
 | Documento | Responde |
 |---|---|
 | `docs/contrato-open-responses.md` | **Qué es correcto** — contrato normativo y suite de aceptación |
-| `docs/PLAN.md` | **Cómo se construyó** — etapas, criterios de salida y decisiones abiertas |
-| `docs/Bitacora.MD` | **Por qué se decidió así** — hipótesis evaluadas y rutas descartadas |
 | `docs/arquitectura.md` | **Cómo está hecho** — capas, puertos y adaptadores |
-
-La bitácora documenta también lo que **no** se eligió y por qué: OpenRouter
-frente a Bedrock, Lambda y API Gateway frente a Fargate, y frameworks de
-orquestación frente al SDK nativo.
+| `docs/plan-ui-astro.md` | **Por qué la UI vive aparte** — diseño de la interfaz web |
+| `ui/README.md` | **Cómo arrancar y desplegar la interfaz web** |

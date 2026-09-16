@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 """Genera fichas de índice del corpus preparado, ingestables en el KB.
 
-    python scripts/generar_indice.py --profile finanzas
-    python scripts/generar_indice.py --profile finanzas --force
-    python scripts/generar_indice.py --profile finanzas --verificar
+    python scripts/generar_indice.py --profile <slug>
+    python scripts/generar_indice.py --profile <slug> --force
+    python scripts/generar_indice.py --profile <slug> --verificar
+
+Las familias y los prompts están pensados para reportes financieros (trimestrales,
+anuales, estados financieros, balances). Un documento cuyo nombre no encaja en
+ninguna familia sale como `documento` y se resume igual.
 
 Produce en `.corpus-preparado/<slug>/`:
   - indice-<slug-doc>.md + .metadata.json  (una por documento fuente)
@@ -61,9 +65,8 @@ FAMILIAS = [
     (re.compile(r"^cnbv-"), "reporte-anual", "Reporte anual CNBV"),
     (re.compile(r"^reporte-anual-"), "reporte-anual", "Reporte anual"),
     (re.compile(r"^informe-anual-"), "reporte-anual", "Informe Anual Integrado"),
-    (re.compile(r"^informe-anual-"), "reporte-anual", "Informe Anual Integrado"),
     (re.compile(r"^eeff-"), "estados-financieros", "Estados Financieros"),
-    (re.compile(r"^.*-balance"), "balance-mensual", "Balance mensual"),
+    (re.compile(r"^(?:.+-)?(?:mzo|jun|sep|dic)\d\d-balance"), "balance-mensual", "Balance mensual"),
     (re.compile(r"^estado-de-situacin-"), "estado-situacion", "Estado de Situación Financiera"),
 ]
 
@@ -82,7 +85,7 @@ def periodo_desde_slug(slug_doc: str) -> str | None:
     m = re.match(r"^(\d)t(\d\d)", slug_doc)
     if m:
         return f"{m.group(1)}T{m.group(2)}"
-    m = re.match(r"^(mzo|jun|sep|dic)(\d\d)-balance", slug_doc)
+    m = re.match(r"^(?:.+-)?(mzo|jun|sep|dic)(\d\d)-balance", slug_doc)
     if m:
         return f"{MESES_BALANCE[m.group(1)]} 20{m.group(2)}"
     m = re.match(r"^informe-anual-integrado-(\d{4})", slug_doc)
@@ -178,12 +181,12 @@ def hash_muestra(rutas: Iterable[Path]) -> str:
     return h.hexdigest()
 
 
-PROMPT_FICHA = """Eres un analista financiero. Vas a leer fragmentos representativos de un documento del corpus de reportes financieros de la emisora. Tu tarea: producir un resumen estructurado en JSON estricto que se usará como ficha de índice.
+PROMPT_FICHA = """Eres un analista financiero. Vas a leer fragmentos representativos de un documento del corpus '{nombre_tema}', que trata sobre {subject}. Tu tarea: producir un resumen estructurado en JSON estricto que se usará como ficha de índice.
 
 Devuelve EXCLUSIVAMENTE un objeto JSON con esta forma exacta, sin envolturas markdown:
 
 {{
-  "titulo": "string — título humano de 4 a 10 palabras, en español, empezando por 'la emisora' cuando aplique. Incluye el periodo si es obvio.",
+  "titulo": "string — título humano de 4 a 10 palabras, en español, empezando por el nombre de la emisora cuando aplique. Incluye el periodo si es obvio.",
   "resumen": "string — 2 a 4 líneas describiendo qué contiene el documento: alcance, foco temático, tipo de estados financieros incluidos, audiencia.",
   "secciones": ["string", "..."],
   "cifras": ["string", "..."]
@@ -207,7 +210,7 @@ Fragmentos representativos (portada, índice, secciones y cierre):
 Recuerda: SOLO el objeto JSON, sin ```json ni comentarios."""
 
 
-PROMPT_MAESTRO = """Eres un editor técnico. Vas a redactar la introducción (2-3 líneas) de un archivo maestro que lista los {n_docs} documentos del corpus 'finanzas' del RAG.
+PROMPT_MAESTRO = """Eres un editor técnico. Vas a redactar la introducción (2-3 líneas) de un archivo maestro que lista los {n_docs} documentos del corpus '{tema}' del RAG, que trata sobre {subject}.
 
 Los documentos ya están clasificados por familia. Solo necesito una introducción SÍNTESIS breve del alcance temporal y temático de la colección.
 
@@ -354,6 +357,9 @@ async def generar_una_ficha(
     modelo: str,
     semaforo: asyncio.Semaphore,
     force: bool,
+    tema: str,
+    nombre_tema: str,
+    subject: str,
 ) -> dict:
     """Genera indice-<slug>.md + .metadata.json para un documento."""
     ruta_ficha = carpeta / f"indice-{doc.slug}.md"
@@ -392,6 +398,8 @@ async def generar_una_ficha(
     )
 
     prompt = PROMPT_FICHA.format(
+        nombre_tema=nombre_tema,
+        subject=subject,
         fuente_pdf=fuente_pdf,
         familia=familia,
         periodo_hint=periodo or "(no inferido)",
@@ -410,7 +418,7 @@ async def generar_una_ficha(
         print(f"✗ {doc.slug}: respuesta no parseable — {exc}", file=sys.stderr)
         datos = {
             "titulo": f"{titulo_base} {periodo or doc.slug}",
-            "resumen": f"Documento del corpus finanzas. Fuente: {fuente_pdf}.",
+            "resumen": f"Documento del corpus {tema}. Fuente: {fuente_pdf}.",
             "secciones": [],
             "cifras": [],
         }
@@ -448,6 +456,7 @@ def renderizar_maestro(
     metadatas: list[dict],
     intro: str,
     total_fragmentos: int,
+    nombre_tema: str,
 ) -> str:
     grupos: dict[str, list[dict]] = defaultdict(list)
     for m in metadatas:
@@ -464,7 +473,7 @@ def renderizar_maestro(
     ]
 
     lineas = [
-        "# Índice del corpus financiero",
+        f"# Índice del corpus: {nombre_tema}",
         "",
         intro.strip(),
         "",
@@ -508,6 +517,9 @@ async def generar_maestro(
     client,
     modelo: str,
     total_fragmentos: int,
+    tema: str,
+    nombre_tema: str,
+    subject: str,
 ) -> None:
     ruta_maestro = carpeta / "indice-corpus.md"
     ruta_meta = carpeta / "indice-corpus.md.metadata.json"
@@ -543,6 +555,8 @@ async def generar_maestro(
     familias_resumen = "\n".join(f"- {k}: {v}" for k, v in grupos.items())
 
     prompt = PROMPT_MAESTRO.format(
+        tema=tema,
+        subject=subject,
         n_docs=len(metadatas),
         familias_resumen=familias_resumen,
         rango_temporal=rango,
@@ -554,16 +568,13 @@ async def generar_maestro(
         intro = str(datos.get("intro") or "").strip()
     except Exception as exc:  # noqa: BLE001 - frontera con boto3/LLM
         print(f"⚠ maestro: no se pudo generar intro con LLM ({exc}); uso fallback", file=sys.stderr)
-        intro = (
-            "Colección de reportes financieros públicos de la emisora "
-            "(reportes trimestrales, informes anuales integrados, estados financieros "
-            "y balances mensuales)."
-        )
+        intro = f"Colección de documentos sobre {subject}."
 
     contenido = renderizar_maestro(
         metadatas=metadatas,
         intro=intro,
         total_fragmentos=total_fragmentos,
+        nombre_tema=nombre_tema,
     )
 
     if ruta_maestro.is_file() and ruta_maestro.read_text(encoding="utf-8") == contenido:
@@ -576,7 +587,7 @@ async def generar_maestro(
         "metadataAttributes": {
             "tipo": "indice",
             "clase": "publico",
-            "fuente": "corpus-finanzas",
+            "fuente": f"corpus-{tema}",
             "familia": "indice-maestro",
             "documentos_cubiertos": len(metadatas),
             "fragmentos_cubiertos": total_fragmentos,
@@ -677,11 +688,13 @@ async def main_async(args: argparse.Namespace) -> int:
     session = boto3.Session(**kwargs)
     client = session.client("bedrock-runtime")
 
+    perfil = binding.profile
+    tema = {"tema": perfil.slug, "nombre_tema": perfil.name, "subject": perfil.subject}
     semaforo = asyncio.Semaphore(CONCURRENCIA)
     tareas = [
         generar_una_ficha(
             doc, carpeta=carpeta, client=client, modelo=args.model,
-            semaforo=semaforo, force=args.force,
+            semaforo=semaforo, force=args.force, **tema,
         )
         for doc in documentos.values()
     ]
@@ -690,7 +703,7 @@ async def main_async(args: argparse.Namespace) -> int:
     await generar_maestro(
         metadatas,
         carpeta=carpeta, client=client, modelo=args.model,
-        total_fragmentos=total_fragmentos,
+        total_fragmentos=total_fragmentos, **tema,
     )
 
     print(f"\n✓ {len(documentos)} fichas + 1 maestro escritos en {carpeta}")
